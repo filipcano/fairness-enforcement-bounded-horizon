@@ -15,39 +15,46 @@ import datetime
 from dataset import load_census_income_kdd_data,load_census_income_kdd_data,load_adult_data,load_german_data, load_compas_data, load_german_data, load_bank_marketing_data, load_acs_data
 from utils import seed_everything, PandasDataSet, print_metrics, clear_lines, InfiniteDataLoader
 from metrics import metric_evaluation
-from networks import MLP
-
-from loss import HSIC
+from networks import MLP, AdvDebiasing
 
 
+def train_epoch(advfairnet, data_loader, clf_criterion, adv_criterion, optimizer, device):
+    advfairnet.train()
 
-def train_epoch(model, train_loader, optimizer, clf_criterion, fair_criterion, lambda1, device, args=None):
-    model.train()
-    for batch_idx, (data, target, sensitive) in enumerate(train_loader):
-        data, target, sensitive = data.to(device), target.to(device), sensitive.to(device)
+    for batch_idx, (X, y, s) in enumerate(data_loader):
+        X, y, s = X.to(device), y.to(device), s.to(device)
+
         optimizer.zero_grad()
-        h, output = model(data)
-        clf_loss = clf_criterion(output, target)
-        fair_loss = fair_criterion(output, sensitive)
-        loss = clf_loss + lambda1 * fair_loss
+
+        y_hat, s_hat = advfairnet(X)
+        clf_loss = clf_criterion(y_hat, y)
+        adv_loss = adv_criterion(s_hat, s)
+
+        loss = clf_loss + args.lam*adv_loss
         loss.backward()
-        optimizer.step()
-    return model, loss.item(), clf_loss.item(), fair_loss.item()
+        optimizer.step()        
+    
+    return advfairnet
 
 
-def train_step(model, data, target, sensitive, scheduler, optimizer, clf_criterion, fair_criterion, lam, device, args=None):
+
+
+def train_step(model, data, target, sensitive, clf_criterion, adv_criterion, optimizer, scheduler, lam, device, args=None):
     model.train()
     optimizer.zero_grad()
-    h, output = model(data)
-    clf_loss = clf_criterion(output, target)
-    fair_loss = fair_criterion(output, sensitive)
-    loss = clf_loss + lam * fair_loss
+    y_hat, s_hat = model(data)
+    clf_loss = clf_criterion(y_hat, target)
+    adv_loss = adv_criterion(s_hat, sensitive)
+
+    loss = clf_loss + lam*adv_loss
     loss.backward()
     optimizer.step()
     scheduler.step()
-    return model, loss.item(), clf_loss.item(), fair_loss.item()
+    return model, loss.item(), clf_loss.item(), adv_loss.item()
 
-def test(model, test_loader, clf_criterion, fair_criterion, lam, device, prefix="test", args=None):
+
+
+def test(model, test_loader, clf_criterion, adv_criterion, lam, device, prefix="test", args=None):
     model.eval()
     clf_loss = 0
     fair_loss = 0
@@ -58,10 +65,10 @@ def test(model, test_loader, clf_criterion, fair_criterion, lam, device, prefix=
     with torch.no_grad():
         for data, target, sensitive in test_loader:
             data, target, sensitive = (data.to(device), target.to(device), sensitive.to(device))
-            h, output = model(data)
-
+            # h, output = model.inference(data)
+            output, s_hat = model(data)
             clf_loss += clf_criterion(output, target).item()
-            fair_loss += fair_criterion(output, sensitive).item()
+            fair_loss += adv_criterion(s_hat, sensitive).item()
             target_hat_list.append(output.cpu().numpy())
             target_list.append(target.cpu().numpy())
             sensitive_list.append(sensitive.cpu().numpy())
@@ -71,12 +78,13 @@ def test(model, test_loader, clf_criterion, fair_criterion, lam, device, prefix=
     sensitive_list = np.concatenate(sensitive_list, axis=0)
     metric = metric_evaluation(y_gt=target_list, y_pre=target_hat_list, s=sensitive_list, prefix=f"{prefix}")
 
-    clf_loss /= len(test_loader)
-    fair_loss /= len(test_loader)
+    clf_loss /= len(test_loader.dataset)
+    fair_loss /= len(test_loader.dataset)
     
     metric[f"{prefix}/clf_loss"] = clf_loss
     metric[f"{prefix}/fair_loss"] = fair_loss
     metric[f"{prefix}/loss"] = clf_loss + lam*fair_loss
+
 
     return metric
 
@@ -87,7 +95,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_path", type=str, default="../datasets/adult/raw")
     parser.add_argument("--dataset", type=str,default="adult",choices=["adult","kdd","acs","german", "compas" ,"bank_marketing"], help="e.g. adult,kdd,acs,german,compas,bank_marketing")
-    parser.add_argument("--model", type=str, default="diffdp")
+    parser.add_argument("--model", type=str, default="adv")
     parser.add_argument("--target_attr", type=str, default="income")
     parser.add_argument("--sensitive_attr", type=str, default="sex")
     parser.add_argument("--evaluation_metrics", type=str, default="acc,ap,dp,eopp,eodd", help="e.g. acc,ap,dp")
@@ -95,14 +103,19 @@ if __name__ == "__main__":
 
     parser.add_argument("--lam", type=float, default=1.0)
 
-    parser.add_argument("--num_training_steps", type=int, default=150)
+    parser.add_argument("--num_training_steps", type=int, default=250)
     parser.add_argument("--batch_size", type=int, default=1024)
-    parser.add_argument("--evaluation_batch_size", type=int, default=512)
+    parser.add_argument("--evaluation_batch_size", type=int, default=1024000)
     parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--mlp_layers", type=str, default="512,256,64", help="e.g. 512,256,64")
 
     parser.add_argument("--seed", type=int, default=1314)
     parser.add_argument("--exp_name", type=str, default="uuid")
+
+    args = parser.parse_args()
+    table = tabulate([(k, v) for k, v in vars(args).items()], tablefmt='grid')
+    print(table)
+
 
 
     args = parser.parse_args()
@@ -111,7 +124,7 @@ if __name__ == "__main__":
 
     seed_everything(seed=args.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print("CUDA Available:", torch.cuda.is_available())
+
 
     if args.dataset == "adult":
         print(f"Dataset: adult")
@@ -128,6 +141,7 @@ if __name__ == "__main__":
     elif args.dataset == "compas":
         print(f"Dataset: compas")
         X, y, s = load_compas_data(path="../datasets/compas/raw", sensitive_attribute=args.sensitive_attr)
+
     elif args.dataset == "bank_marketing":
         print(f"Dataset: bank_marketing")
         X, y, s = load_bank_marketing_data(path="../datasets/bank_marketing/raw", sensitive_attribute=args.sensitive_attr)
@@ -137,6 +151,7 @@ if __name__ == "__main__":
 
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
+    
 
     categorical_cols = X.select_dtypes("string").columns
     if len(categorical_cols) > 0:
@@ -168,8 +183,8 @@ if __name__ == "__main__":
 
     # Create the table using the tabulate function
     table = tabulate([(k, v) for k, v in dataset_stats.items()], tablefmt='grid')
-
     print(table)
+
 
     numurical_cols = X.select_dtypes("float32").columns
     if len(numurical_cols) > 0:
@@ -187,40 +202,45 @@ if __name__ == "__main__":
         X_val[numurical_cols]   = X_val[numurical_cols].pipe(scale_df, scaler)
         X_test[numurical_cols]  = X_test[numurical_cols].pipe(scale_df, scaler)
 
+
     train_data = PandasDataSet(X_train, y_train, s_train)
     val_data = PandasDataSet(X_val, y_val, s_val)
     test_data = PandasDataSet(X_test, y_test, s_test)
+
 
     train_infinite_loader = InfiniteDataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
     train_loader = DataLoader(train_data, batch_size=args.evaluation_batch_size, shuffle=True)
     val_loader = DataLoader(val_data, batch_size=args.evaluation_batch_size, shuffle=False)
     test_loader = DataLoader(test_data, batch_size=args.evaluation_batch_size, shuffle=False)
 
+
+
     mlp_layers = [int(x) for x in args.mlp_layers.split(",")]
-    net = MLP(n_features=n_features, num_classes=1, mlp_layers=mlp_layers ).to(device)
+    advfairnet = AdvDebiasing( n_features=n_features, num_classes=1, hidden_layers=mlp_layers ).to(device)
     clf_criterion = nn.BCELoss()
-    fair_criterion = HSIC(device=device)
-    optimizer = optim.Adam(net.parameters(), lr=args.lr)
+    adv_criterion = nn.BCELoss(reduction="mean")
+    optimizer = optim.Adam( advfairnet.parameters(), lr=args.lr )
     scheduler = StepLR(optimizer, step_size=50, gamma=0.1)
 
-    print(net)
+    print(advfairnet)
 
     logs = []
     headers = ["Step(Tr|Val|Te)"] + args.evaluation_metrics.split(",")
 
-    # evaluation_metrics = "ap,dp,prule"
 
     for step, (X, y, s) in enumerate(train_infinite_loader):
         if step >= args.num_training_steps:
             break
 
-        X, y, s = X.to(device), y.to(device), s.to(device)
-        net, loss, clf_loss, fair_loss = train_step(model=net, data=X, target=y, sensitive=s, optimizer=optimizer, scheduler=scheduler,  clf_criterion=clf_criterion, fair_criterion=fair_criterion, lam=args.lam,  device=device)
+        X, y, s = X.to(device), y.to(device), s.to(device) 
+        advfairnet, loss, clf_loss, fair_loss = train_step(model=advfairnet, data=X, target=y, sensitive=s, optimizer=optimizer, scheduler=scheduler,  clf_criterion=clf_criterion, adv_criterion=adv_criterion, lam=args.lam,  device=device)
+
+        # advfairnet = train_step(advfairnet, train_infinite_loader, optimizer, clf_criterion, adv_criterion, device, args)
 
         if step % args.log_freq == 0 or step == 1 or step == args.num_training_steps:
-            train_metrics = test(model=net, test_loader=train_loader, clf_criterion=clf_criterion, fair_criterion=fair_criterion, lam=args.lam, device=device, prefix="train")
-            val_metrics   = test(model=net, test_loader=val_loader,   clf_criterion=clf_criterion, fair_criterion=fair_criterion, lam=args.lam, device=device, prefix="val")
-            test_metrics  = test(model=net, test_loader=test_loader,  clf_criterion=clf_criterion, fair_criterion=fair_criterion, lam=args.lam, device=device, prefix="test")
+            train_metrics = test(model=advfairnet, test_loader=train_loader, clf_criterion=clf_criterion, adv_criterion=adv_criterion, lam=args.lam, device=device,  prefix="train")
+            val_metrics   = test(model=advfairnet, test_loader=val_loader, clf_criterion=clf_criterion, adv_criterion=adv_criterion, lam=args.lam, device=device, prefix="val")
+            test_metrics  =  test(model=advfairnet, test_loader=test_loader, clf_criterion=clf_criterion, adv_criterion=adv_criterion, lam=args.lam, device=device, prefix="test")
             res_dict = {}
             res_dict["training/step"] = step
             res_dict["training/loss"] = loss
@@ -240,7 +260,14 @@ if __name__ == "__main__":
                     clear_lines(len(logs)*2 + 1)
                 table = tabulate(logs, headers=headers, tablefmt="grid", floatfmt="02.2f")
                 print(table)
-    
+
     model_name = f"../experimental_results/ML_models/model_{args.dataset}_{args.sensitive_attr}_{args.model}_{timestamp}.pkl"
-    torch.save(net, model_name)
+    torch.save(advfairnet, model_name)
+
+
+
+
+
+
+
 

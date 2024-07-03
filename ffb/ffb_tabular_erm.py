@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
 from tabulate import tabulate
 import time
+import datetime
 
 from dataset import load_census_income_kdd_data,load_census_income_kdd_data,load_adult_data,load_german_data, load_compas_data, load_german_data, load_bank_marketing_data, load_acs_data
 from utils import seed_everything, PandasDataSet, print_metrics, clear_lines, InfiniteDataLoader
@@ -134,7 +135,9 @@ if __name__ == "__main__":
     if len(categorical_cols) > 0:
         X = pd.get_dummies(X, columns=categorical_cols)
 
-
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+ 
+ 
     n_features = X.shape[1]
     n_classes = len(np.unique(y))
 
@@ -249,5 +252,8 @@ if __name__ == "__main__":
                     clear_lines(len(logs)*2 + 1)
                 table = tabulate(logs, headers=headers, tablefmt="grid", floatfmt="02.2f")
                 print(table)
+
+    model_name = f"../experimental_results/ML_models/model_{args.dataset}_{args.sensitive_attr}_{args.model}_{timestamp}.pkl"
+    torch.save(net, model_name)
 
 

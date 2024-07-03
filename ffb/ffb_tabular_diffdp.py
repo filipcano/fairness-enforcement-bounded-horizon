@@ -17,7 +17,9 @@ from utils import seed_everything, PandasDataSet, print_metrics, clear_lines, In
 from metrics import metric_evaluation
 from networks import MLP
 
-from loss import HSIC
+from loss import DiffDP
+
+
 
 
 
@@ -97,7 +99,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--num_training_steps", type=int, default=150)
     parser.add_argument("--batch_size", type=int, default=1024)
-    parser.add_argument("--evaluation_batch_size", type=int, default=512)
+    parser.add_argument("--evaluation_batch_size", type=int, default=1024000)
     parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--mlp_layers", type=str, default="512,256,64", help="e.g. 512,256,64")
 
@@ -109,9 +111,12 @@ if __name__ == "__main__":
     table = tabulate([(k, v) for k, v in vars(args).items()], tablefmt='grid')
     print(table)
 
+
+
+
     seed_everything(seed=args.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print("CUDA Available:", torch.cuda.is_available())
+
 
     if args.dataset == "adult":
         print(f"Dataset: adult")
@@ -128,6 +133,7 @@ if __name__ == "__main__":
     elif args.dataset == "compas":
         print(f"Dataset: compas")
         X, y, s = load_compas_data(path="../datasets/compas/raw", sensitive_attribute=args.sensitive_attr)
+
     elif args.dataset == "bank_marketing":
         print(f"Dataset: bank_marketing")
         X, y, s = load_bank_marketing_data(path="../datasets/bank_marketing/raw", sensitive_attribute=args.sensitive_attr)
@@ -137,6 +143,7 @@ if __name__ == "__main__":
 
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
+    
 
     categorical_cols = X.select_dtypes("string").columns
     if len(categorical_cols) > 0:
@@ -171,6 +178,7 @@ if __name__ == "__main__":
 
     print(table)
 
+
     numurical_cols = X.select_dtypes("float32").columns
     if len(numurical_cols) > 0:
         # scaler = StandardScaler().fit(X[numurical_cols])
@@ -187,28 +195,35 @@ if __name__ == "__main__":
         X_val[numurical_cols]   = X_val[numurical_cols].pipe(scale_df, scaler)
         X_test[numurical_cols]  = X_test[numurical_cols].pipe(scale_df, scaler)
 
+
     train_data = PandasDataSet(X_train, y_train, s_train)
     val_data = PandasDataSet(X_val, y_val, s_val)
     test_data = PandasDataSet(X_test, y_test, s_test)
+
 
     train_infinite_loader = InfiniteDataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
     train_loader = DataLoader(train_data, batch_size=args.evaluation_batch_size, shuffle=True)
     val_loader = DataLoader(val_data, batch_size=args.evaluation_batch_size, shuffle=False)
     test_loader = DataLoader(test_data, batch_size=args.evaluation_batch_size, shuffle=False)
 
+
+
+
     mlp_layers = [int(x) for x in args.mlp_layers.split(",")]
     net = MLP(n_features=n_features, num_classes=1, mlp_layers=mlp_layers ).to(device)
     clf_criterion = nn.BCELoss()
-    fair_criterion = HSIC(device=device)
+    fair_criterion = DiffDP()
     optimizer = optim.Adam(net.parameters(), lr=args.lr)
     scheduler = StepLR(optimizer, step_size=50, gamma=0.1)
 
     print(net)
 
+
     logs = []
     headers = ["Step(Tr|Val|Te)"] + args.evaluation_metrics.split(",")
 
     # evaluation_metrics = "ap,dp,prule"
+
 
     for step, (X, y, s) in enumerate(train_infinite_loader):
         if step >= args.num_training_steps:
@@ -216,6 +231,7 @@ if __name__ == "__main__":
 
         X, y, s = X.to(device), y.to(device), s.to(device)
         net, loss, clf_loss, fair_loss = train_step(model=net, data=X, target=y, sensitive=s, optimizer=optimizer, scheduler=scheduler,  clf_criterion=clf_criterion, fair_criterion=fair_criterion, lam=args.lam,  device=device)
+
 
         if step % args.log_freq == 0 or step == 1 or step == args.num_training_steps:
             train_metrics = test(model=net, test_loader=train_loader, clf_criterion=clf_criterion, fair_criterion=fair_criterion, lam=args.lam, device=device, prefix="train")
@@ -231,6 +247,7 @@ if __name__ == "__main__":
             res_dict.update(val_metrics)
             res_dict.update(test_metrics)
 
+            # for wandb logging
 
             # for printing
             if step % (args.log_freq*10) == 0:
@@ -240,7 +257,7 @@ if __name__ == "__main__":
                     clear_lines(len(logs)*2 + 1)
                 table = tabulate(logs, headers=headers, tablefmt="grid", floatfmt="02.2f")
                 print(table)
-    
+
+
     model_name = f"../experimental_results/ML_models/model_{args.dataset}_{args.sensitive_attr}_{args.model}_{timestamp}.pkl"
     torch.save(net, model_name)
-
