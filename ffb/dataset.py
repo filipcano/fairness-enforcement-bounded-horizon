@@ -83,8 +83,8 @@ def load_adult_data(path="../datasets", sensitive_attribute="sex"):
 
     # Convert all non-uint8 columns to float32
     string_cols = X.select_dtypes(exclude="string").columns
-    print(X.head())
-    print(string_cols)
+    # print(X.head())
+    # print(string_cols)
     X[string_cols] = X[string_cols].astype("float32")
 
     return X, y, s
@@ -258,66 +258,6 @@ def load_acs_data(path = '../datasets/acs/raw', target_attr="income", sensitive_
 
     return X, y, s
 
-# def load_meps_data(path="../datasets/meps/raw", sensitive_attribute="age"):
-#     categorical_features = (
-#         ["REGION","SEX","MARRY","FTSTU","ACTDTY","HONRDC","RTHLTH","MNHLTH","HIBPDX","CHDDX","ANGIDX","MIDX","OHRTDX","STRKDX","EMPHDX","CHBRON","CHOLDX","CANCERDX","DIABDX","JTPAIN","ARTHDX","ARTHTYPE","ASTHDX","ADHDADDX","PREGNT","WLKLIM","ACTLIM","SOCLIM","COGLIM","DFHEAR42","DFSEE42","ADSMOK42","PHQ242","EMPST","POVCAT","INSCOV",],
-#     )
-#     features_to_keep = ["REGION","AGE","SEX","RACE","MARRY","FTSTU","ACTDTY","HONRDC","RTHLTH","MNHLTH","HIBPDX","CHDDX","ANGIDX","MIDX","OHRTDX","STRKDX","EMPHDX","CHBRON","CHOLDX","CANCERDX","DIABDX","JTPAIN","ARTHDX","ARTHTYPE","ASTHDX","ADHDADDX","PREGNT","WLKLIM","ACTLIM","SOCLIM","COGLIM","DFHEAR42","DFSEE42","ADSMOK42","PCS42","MCS42","K6SUM42","PHQ242","EMPST","POVCAT","INSCOV","UTILIZATION","PERWT16F",
-#     ]
-
-#     df = pd.read_csv(os.path.join(path, "h181.csv"))
-
-#     def race(row):
-#         # non-Hispanic Whites are marked as WHITE; all others as NON-WHITE
-#         if (row["HISPANX"] == 2) and (row["RACEV2X"] == 1):
-#             return "White"
-#         return "Non-White"
-
-#     df["RACEV2X"] = df.apply(lambda row: race(row), axis=1)
-#     df = df.rename(columns={"RACEV2X": "RACE"})
-
-#     df = df[df["PANEL"] == 21]
-
-#     # RENAME COLUMNS
-#     df = df.rename(
-#         columns={"FTSTU53X": "FTSTU","ACTDTY53": "ACTDTY","HONRDC53": "HONRDC","RTHLTH53": "RTHLTH","MNHLTH53": "MNHLTH","CHBRON53": "CHBRON","JTPAIN53": "JTPAIN","PREGNT53": "PREGNT","WLKLIM53": "WLKLIM","ACTLIM53": "ACTLIM","SOCLIM53": "SOCLIM","COGLIM53": "COGLIM","EMPST53": "EMPST","REGION53": "REGION","MARRY53X": "MARRY","AGE53X": "AGE","POVCAT16": "POVCAT","INSCOV16": "INSCOV",
-#         }
-#     )
-
-#     df = df[df["REGION"] >= 0]  # remove values -1
-#     df = df[df["AGE"] >= 0]  # remove values -1
-
-#     df = df[df["MARRY"] >= 0]  # remove values -1, -7, -8, -9
-
-#     df = df[df["ASTHDX"] >= 0]  # remove values -1, -7, -8, -9
-
-#     df = df[
-#         (
-#             df[
-#                 ["FTSTU","ACTDTY","HONRDC","RTHLTH","MNHLTH","HIBPDX","CHDDX","ANGIDX","EDUCYR","HIDEG","MIDX","OHRTDX","STRKDX","EMPHDX","CHBRON","CHOLDX","CANCERDX","DIABDX","JTPAIN","ARTHDX","ARTHTYPE","ASTHDX","ADHDADDX","PREGNT","WLKLIM","ACTLIM","SOCLIM","COGLIM","DFHEAR42","DFSEE42","ADSMOK42","PHQ242","EMPST","POVCAT","INSCOV",
-#                 ]
-#             ]
-#             >= -1
-#         ).all(1)
-#     ]  # for all other categorical features, remove values < -1
-
-#     def utilization(row):
-#         return row["OBTOTV16"] + row["OPTOTV16"] + row["ERTOT16"] + row["IPNGTD16"] + row["HHTOTD16"]
-
-#     df["TOTEXP16"] = df.apply(lambda row: utilization(row), axis=1)
-#     lessE = df["TOTEXP16"] < 10.0
-#     df.loc[lessE, "TOTEXP16"] = 0.0
-#     moreE = df["TOTEXP16"] >= 10.0
-#     df.loc[moreE, "TOTEXP16"] = 1.0
-
-#     df = df.rename(columns={"TOTEXP16": "UTILIZATION"})
-
-#     df["target"] = df["target"].replace({"yes": 1, "no": 0})
-#     y = df["target"]
-#     s = df[sensitive_attribute]
-#     s = (s >= 25).astype(int).to_frame()
-#     X = df.drop(columns=["target", "age"])
-#     return X, y, s
 
 
 def load_compas_data(path="../datasets/compas/raw", sensitive_attribute="sex"):
