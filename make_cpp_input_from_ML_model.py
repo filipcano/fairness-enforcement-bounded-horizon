@@ -5,6 +5,7 @@ import pandas as pd
 from ffb.utils import PandasDataSet
 from torch.utils.data import DataLoader
 from sklearn.preprocessing import StandardScaler
+import subprocess
 
 import sys
 import os
@@ -160,7 +161,32 @@ def main():
     for i in range(args.n_cost_bins):
         output_str += f"{probs_acc_1[i]*probGroup1:.5f} "
     
-    print(output_str)
+    tmp_input_path = "cpp_inputs/prova_input.txt"
+    tmp_saved_policy_path = "experimental_results/prova_policy.txt"
+    with open(tmp_input_path, "w") as fp:
+        fp.write(output_str)
+
+
+    # Command and arguments
+    command = ['./a.out', '--save_policy', f'--saved_policy_file={tmp_saved_policy_path}']
+
+    # Open the input file
+    with open(tmp_input_path, 'r') as input_file:
+        # Call the C++ executable with subprocess.run
+        result = subprocess.run(
+            command,
+            stdin=input_file,          # Set stdin to read from the file
+            capture_output=True,       # To capture stdout and stderr
+            text=True                  # To get outputs as strings (not bytes)
+        )
+
+    # Print the outputs and errors, if any
+    print("Output:", result.stdout)
+    
+
+
+
+    # print(output_str)
 
 
 
