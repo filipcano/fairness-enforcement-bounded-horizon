@@ -4,3 +4,6 @@ temporal_results/*
 __pycache__/*
 datasets/*/*
 */wandb/*
+.vscode/*
+*.ipynb_checkpoints*
+*.out

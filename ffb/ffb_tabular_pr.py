@@ -9,7 +9,7 @@ from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
 from tabulate import tabulate
-import datetime
+import datetime, os
 
 from dataset import load_census_income_kdd_data,load_census_income_kdd_data,load_adult_data,load_german_data, load_compas_data, load_german_data, load_bank_marketing_data, load_acs_data
 from utils import seed_everything, PandasDataSet, print_metrics, clear_lines, InfiniteDataLoader
@@ -256,7 +256,19 @@ if __name__ == "__main__":
                 table = tabulate(logs, headers=headers, tablefmt="grid", floatfmt="02.2f")
                 print(table)
 
-    model_name = f"../experimental_results/ML_models/model_{args.dataset}_{args.sensitive_attr}_{args.model}_{timestamp}.pkl"
+    # model_name = f"../experimental_results/ML_models/model_{args.dataset}_{args.sensitive_attr}_{args.model}_{timestamp}.pkl"
+    model_name = f"../experimental_results/ML_models/model_{args.dataset}_{args.sensitive_attr}_{args.model}.pkl"
+
+    def add_numbering(name, i):
+        extension = name.split('.')[-1]
+        return f"{'.'.join(name.split('.')[:-1])}_{i}.{extension}"
+
+    if os.path.isfile(model_name):
+        i = 0
+        while (os.path.isfile(add_numbering(model_name, i))):
+            i += 1
+        model_name = add_numbering(model_name, i)
+    
     torch.save(net, model_name)
 
 

@@ -13,7 +13,12 @@ sys.path.append('ffb')
 
 from ffb.dataset import load_adult_data, load_german_data, load_compas_data, load_bank_marketing_data
 
-def assert_sensitive_attribute(dataset, sensitive_attr):
+def assert_input_integrity(dataset, sensitive_attr, ml_model):
+    if dataset not in ml_model:
+        raise ValueError(f"ML model {ml_model} was not trained on {dataset} data")
+    if sensitive_attr not in ml_model:
+        raise ValueError(f"Attribute {sensitive_attr} was not considered as sensitive when training {ml_model}")
+
     valid_pairings = {
         "adult" : ["sex", "race"],
         "german" : ["sex", "age"],
@@ -45,7 +50,7 @@ def main():
 
     args = parser.parse_args()
 
-    args.sensitive_attr = assert_sensitive_attribute(args.dataset, args.sensitive_attr)
+    args.sensitive_attr = assert_input_integrity(args.dataset, args.sensitive_attr, args.ml_model)
 
     net = torch.load(args.ml_model)
 
