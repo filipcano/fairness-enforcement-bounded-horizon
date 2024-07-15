@@ -16,7 +16,7 @@ const int GROUP_A = 0;
 const int GROUP_B = 1;
 const int ACCEPT = 1;
 const int REJECT = 0;
-const int INF = 1e9;
+const float INF = std::numeric_limits<float>::infinity();
 
 typedef vector<int> VI;
 typedef vector<float> VD;
@@ -74,6 +74,15 @@ VI convertToBaseB(int N, int B) {
 class DPEnforcerMinCost {
     V4D VAL;
     // VAL[remaining_decisions][Group A accepted][Group B accepted][Group A seen]
+    // VAL[remaining_decisions][Group A seen][Group A accepted][Group A acc]
+    // remaining_decisions: 0 ... T
+    // Group A seen: 0 ... T-remaining_decisions
+    // Group A accepted: 0 ... gAseen //
+    // Group B accepted : 0 ... T-remaining_decisions-gAseen
+    // Group B observed is taken from Group A seen, T and remaining decisions, as gBseen = T-remaining_decisions-gAseen
+
+    // Deprecated: 
+    // VAL[remaining_decisions][Group A accepted][Group B accepted][Group A seen]
     // remaining_decisions: 0 ... T
     // Group A accepted: 0 ... T
     // Group B accepted: 0 ... T // this could be optimizied, T is too bias, would not pass the constraint
@@ -91,24 +100,28 @@ public:
     int X; // total number of costs
     VD N; // sequence of costs, of size X
     float eps; // threshold
+    float alpha, beta; // min and max acceptance rates (for composability)
+    int buff_gAacc, buff_gAseen, buff_gBacc, buff_gBseen; // buffer values to compute buffered DP
     int defaultVal;
 
     V4D Prob; // Prob[i][j][k][l] prob of sampling group j, and decision k and value l at timestep i
 
     
-    float Val(int t, int gAacc, int gBacc, int gAseen);
+    float Val(int t, int gAseen, int gAacc, int gBacc);
+    float compute_dp(int gAseen, int gAacc, int gBseen, int gBacc);
     void printInputs();
-    void printValTable();
     V2D make_one_simulation();
     void save_val_to_file(string filename);
     void load_val_from_file(string filename);
 };
 
 DPEnforcerMinCost::DPEnforcerMinCost(bool dynamic_distribution) {
-    cin >> T >> X >> eps;
+    cin >> T >> X >> eps >> alpha >> beta;
+    cin >> buff_gAacc >> buff_gAseen >> buff_gBacc >> buff_gBseen;
+
     N = VD(X,0);
-    int minval = INF;
-    int maxval = -INF;
+    int minval = 1e9;
+    int maxval = -minval;
     for (int i = 0; i < X; ++i) {
         cin >> N[i];
         minval = min((float)minval, N[i]);
@@ -141,7 +154,19 @@ DPEnforcerMinCost::DPEnforcerMinCost(bool dynamic_distribution) {
 
 
     
-    VAL = V4D(T+1, V3D(T+1, V2D(T+1, VD(T+1, defaultVal))));
+    // VAL = V4D(T+1, V3D(T+1, V2D(T+1, VD(T+1, defaultVal))));
+
+    VAL = V4D(T+1);
+    for (int rem_dec = 0; rem_dec <= T; ++rem_dec) {
+        int t = T - rem_dec;
+        VAL[rem_dec] = V3D(t+1);
+        for (int gAseen = 0; gAseen <= t; ++gAseen) {
+            VAL[rem_dec][gAseen] = V2D(gAseen+1);
+            for (int gAacc = 0; gAacc <= gAseen; ++gAacc) {
+                VAL[rem_dec][gAseen][gAacc] = VD(t-gAseen+1, defaultVal);
+            }
+        }
+    }
 }
 
 
@@ -165,35 +190,34 @@ void DPEnforcerMinCost::printInputs() {
 
 }
 
-void DPEnforcerMinCost::printValTable() {
-    cout << "Start print Val Table" << endl;
-    for (int t = 0; t < T+1; ++t) {
-        for (int gAacc = 0; gAacc < T+1; ++gAacc) {
-            for (int gBacc =0; gBacc < T+1; ++gBacc) {
-                for (int gAseen = 0; gAseen< T+1; ++ gAseen) {
-                    int gBseen = (T-t)-gAseen;
-                    float res = VAL[t][gAacc][gBacc][gAseen]; 
-                    if (res != defaultVal) {
-                        cout << "t: " << t << ", gAacc: " <<  gAacc << ", gBacc: " << gBacc;
-                        cout << ", gAseen: " << gAseen << ", gBseen: " << gBseen << ", res: " << res << endl; 
-                    }
-                }
-            }
-        }
-    }
-    cout << "Finished printing\n";
-}
 
 void DPEnforcerMinCost::save_val_to_file(string filename) {
     // Serialize
-    cout << "Saving policy..." << endl;
+    cout << "Saving policy in " << filename << " ..." << endl;
+
     std::ofstream file(filename);
     if (file.is_open()) {
         for (int i1 =0; i1 < VAL.size(); ++i1) {
-            for (int i2=0; i2 < VAL[0].size(); ++i2) {
-                for (int i3=0; i3< VAL[0][0].size(); ++i3) {
-                    for (int i4=0; i4< VAL[0][0][0].size(); ++i4) {
-                        if (VAL[i1][i2][i3][i4] != -1) {
+            for (int i2=0; i2 < VAL[i1].size(); ++i2) {
+                for (int i3=0; i3< VAL[i1][i2].size(); ++i3) {
+                    for (int i4=0; i4< VAL[i1][i2][i3].size(); ++i4) {
+                        float val = VAL[i1][i2][i3][i4];
+                        bool print = true;
+                        if (val == 0.0) {
+                            print = false;
+                        }
+                        else if (val == INF) {
+                            int gAseen = i2;
+                            int gAacc = i3;
+                            int gBacc = i4;
+                            int gBseen = T - i1 - gAseen;
+                            float dp = abs((float)gAacc/(1+gAseen) - (float)gBacc/(1+gBseen));
+                            if (dp < eps) print = true;
+                            else print = false;
+                        }
+                        else if (val == defaultVal) print = false;
+                        
+                        if (print) {
                             file << i1 << " " << i2 << " " << i3 << " " << i4;
                             file << " " << VAL[i1][i2][i3][i4] << "\n";
                         }
@@ -226,10 +250,10 @@ void DPEnforcerMinCost::load_val_from_file(string filename) {
 
 VD DPEnforcerMinCost::get_threshold(int t, int gAacc, int gBacc, int gAseen) {
     VD threshold(2,0);
-    float acceptA = Val(t-1,gAacc +1, gBacc, gAseen+1);
-    float rejectA = Val(t-1, gAacc, gBacc, gAseen+1);
-    float acceptB = Val(t-1, gAacc, gBacc+1, gAseen);
-    float rejectB = Val(t-1, gAacc, gBacc, gAseen);
+    float acceptA = Val(t-1, gAseen+1, gAacc +1, gBacc);
+    float rejectA = Val(t-1, gAseen+1, gAacc, gBacc);
+    float acceptB = Val(t-1, gAseen, gAacc, gBacc+1);
+    float rejectB = Val(t-1, gAseen, gAacc, gBacc);
 
     int min_it = 0;
     while ((min_it < N.size()) and (rejectA > acceptA + N[min_it])) ++min_it;
@@ -257,18 +281,31 @@ VD DPEnforcerMinCost::get_threshold(int t, int gAacc, int gBacc, int gAseen) {
     return threshold;
 }
 
-float DPEnforcerMinCost::Val(int t, int gAacc, int gBacc, int gAseen) {
+float DPEnforcerMinCost::compute_dp(int gAseen, int gAacc, int gBseen, int gBacc) {
+    int a = gAacc + buff_gAacc;
+    int b = gAseen + buff_gAseen;
+    int p = gBacc + buff_gBacc;
+    int q = gBseen + buff_gBseen;
+
+    if (b + q == 0) return 0;
+    return abs((float)a/(1.0 + b) - (float)p/(1.0 + q));
+}
+
+float DPEnforcerMinCost::Val(int t, int gAseen, int gAacc, int gBacc) {
     // cout << "hola1" << endl;
     // cout << "t: " << t << ", gAacc: " <<  gAacc << ", gBacc: " << gBacc << ", gAseen: " << gAseen << endl;
-    float& res = VAL[t][gAacc][gBacc][gAseen];
+    float& res = VAL[t][gAseen][gAacc][gBacc];
     // cout << "t: " << t << ", gAacc: " <<  gAacc << ", gBacc: " << gBacc << endl << endl;
     // cout << ", gAseen: " << gAseen << ", gBseen" << (X-t)-gAseen << ", res: " << res << endl; 
     if (res != defaultVal) return res;
     // cout << "t: " << t << ", gAacc: " <<  gAacc << ", gBacc: " << gBacc << ", gAseen: " << gAseen << endl;
     int gBseen = (T-t)-gAseen;
     if (t == 0) {
-        float bias = abs((float)gAacc/(1+gAseen) - (float)gBacc/(1+gBseen));
-        if (bias < eps) {
+        float bias = compute_dp(gAseen, gAacc, gBseen, gBacc);
+        bool accRateA = (alpha*gAseen <= gAacc) and (gAacc <= beta*gAseen);
+        bool accRateB = (alpha*gBseen <= gBacc) and (gBacc <= beta*gBseen);
+
+        if ((bias < eps) and accRateA and accRateB) {
             return res = 0;
         } 
         return res = INF;
@@ -282,20 +319,20 @@ float DPEnforcerMinCost::Val(int t, int gAacc, int gBacc, int gAseen) {
                 float accept = 0;
                 float reject = 0;
                 if (group == GROUP_A and decision == ACCEPT) {
-                    accept = Val(t-1, gAacc +1,gBacc,gAseen+1);
-                    reject = N[k] + Val(t-1, gAacc, gBacc, gAseen+1);
+                    accept = Val(t-1,gAseen+1, gAacc +1,gBacc);
+                    reject = N[k] + Val(t-1, gAseen+1, gAacc, gBacc);
                 }
                 else if (group == GROUP_A and decision == REJECT) {
-                    accept = N[k] + Val(t-1, gAacc +1,gBacc,gAseen+1);
-                    reject = Val(t-1, gAacc, gBacc, gAseen+1);
+                    accept = N[k] + Val(t-1, gAseen+1, gAacc +1,gBacc);
+                    reject = Val(t-1,gAseen+1, gAacc, gBacc);
                 }
                 else if (group == GROUP_B and decision == ACCEPT)  { 
-                    accept = Val(t-1, gAacc, gBacc+1, gAseen);
-                    reject = N[k] + Val(t-1, gAacc, gBacc, gAseen);
+                    accept = Val(t-1,gAseen, gAacc, gBacc+1);
+                    reject = N[k] + Val(t-1, gAseen, gAacc, gBacc);
                 }
                 else { // group == GROUP_B and decision == REJECT
-                    accept = N[k] + Val(t-1, gAacc, gBacc+1, gAseen);
-                    reject = Val(t-1, gAacc, gBacc, gAseen);
+                    accept = N[k] + Val(t-1, gAseen, gAacc, gBacc+1);
+                    reject = Val(t-1, gAseen, gAacc, gBacc);
                 }
                 res += Prob[t][group][decision][k]*min(accept, reject);
             }

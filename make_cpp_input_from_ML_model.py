@@ -13,6 +13,18 @@ sys.path.append('ffb')
 
 from ffb.dataset import load_adult_data, load_german_data, load_compas_data, load_bank_marketing_data
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ml_model", type=str, default="experimental_results/ML_models/model_adult_race_erm.pkl", help="Path to the trained ML model")
+    parser.add_argument("--dataset", type=str, default="adult", choices=["adult", "german", "compas", "bank_marketing"], help="Choose a dataset")
+    parser.add_argument("--sensitive_attr", type=str, default="race", help="Sensitive attribute for fairness analysis")
+    parser.add_argument("--time_horizon", type=int, default=100, help="Time horizon for fairness properties")
+    parser.add_argument("--n_cost_bins", type=int, default=10, help="Number of bins for the cost")
+    parser.add_argument("--dp_epsilon", type=float, default=0.15, help="Bound on demographic parity")
+    parser.add_argument("--cost", type=str, default="paired", choices=["constant", "paired"], 
+                        help="Cost for each decision. Can be constant or paired with using the provided ML model")
+    return parser.parse_args()
+
 def assert_input_integrity(dataset, sensitive_attr, ml_model):
     if dataset not in ml_model:
         raise ValueError(f"ML model {ml_model} was not trained on {dataset} data")
@@ -34,46 +46,32 @@ def assert_input_integrity(dataset, sensitive_attr, ml_model):
     raise ValueError(f"Unknown dataset: {dataset}")
 
 
-def main():
+def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost):
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--ml_model", type=str, default="experimental_results/ML_models/model_adult_erm_2024-07-02T17-21-57.pkl", help="Path to the trained ML model")
-    parser.add_argument("--dataset", type=str, default="adult", choices=["adult","german", "compas" ,"bank_marketing"], help="Choose a dataset from the available options: adult, german, compas, or bank_marketing")
-    parser.add_argument("--sensitive_attr", type=str, default="sex", help="Sensitive attribute for fairness analysis")
-    parser.add_argument("--T", type=int, default = 10, 
-                        help="Time horizon for fairness properties")
-    parser.add_argument("--n_cost_bins", type=int, default=10, 
-                        help="number of bins for the cost")
-    parser.add_argument("--dp_epsilon", type=float, default=0.15, 
-                        help="bound on demographic parity")
+    sensitive_attr = assert_input_integrity(dataset, sensitive_attr, ml_model)
 
-
-    args = parser.parse_args()
-
-    args.sensitive_attr = assert_input_integrity(args.dataset, args.sensitive_attr, args.ml_model)
-
-    net = torch.load(args.ml_model)
+    net = torch.load(ml_model)
 
     
     
-    if args.dataset == "adult":
+    if dataset == "adult":
         print(f"Dataset: adult")
-        X, y, s = load_adult_data(path="datasets/adult/raw", sensitive_attribute=args.sensitive_attr)
+        X, y, s = load_adult_data(path="datasets/adult/raw", sensitive_attribute=sensitive_attr)
 
-    elif args.dataset == "german":
+    elif dataset == "german":
         print(f"Dataset: german")
-        X, y, s = load_german_data(path="datasets/german/raw", sensitive_attribute=args.sensitive_attr)
+        X, y, s = load_german_data(path="datasets/german/raw", sensitive_attribute=sensitive_attr)
 
-    elif args.dataset == "compas":
+    elif dataset == "compas":
         print(f"Dataset: compas")
-        X, y, s = load_compas_data(path="datasets/compas/raw", sensitive_attribute=args.sensitive_attr)
+        X, y, s = load_compas_data(path="datasets/compas/raw", sensitive_attribute=sensitive_attr)
 
-    elif args.dataset == "bank_marketing":
+    elif dataset == "bank_marketing":
         print(f"Dataset: bank_marketing")
-        X, y, s = load_bank_marketing_data(path="datasets/bank_marketing/raw", sensitive_attribute=args.sensitive_attr)
+        X, y, s = load_bank_marketing_data(path="datasets/bank_marketing/raw", sensitive_attribute=sensitive_attr)
 
     else:
-        raise ValueError(f"Unknown dataset: {args.dataset}")
+        raise ValueError(f"Unknown dataset: {dataset}")
     
     categorical_cols = X.select_dtypes("string").columns
     if len(categorical_cols) > 0:
@@ -101,13 +99,13 @@ def main():
     probGroup0 = s.value_counts()[0]/(len(s))
     probGroup1 = s.value_counts()[1]/(len(s))
 
-    X0 = X[s[args.sensitive_attr] == 0]
-    s0 = s[s[args.sensitive_attr] == 0]
-    y0 = y[s[args.sensitive_attr] == 0]
+    X0 = X[s[sensitive_attr] == 0]
+    s0 = s[s[sensitive_attr] == 0]
+    y0 = y[s[sensitive_attr] == 0]
 
-    X1 = X[s[args.sensitive_attr] == 1]
-    s1 = s[s[args.sensitive_attr] == 1]
-    y1 = y[s[args.sensitive_attr] == 1]
+    X1 = X[s[sensitive_attr] == 1]
+    s1 = s[s[sensitive_attr] == 1]
+    y1 = y[s[sensitive_attr] == 1]
 
     data0 = PandasDataSet(X0, y0, s0)
     loader0 = DataLoader(data0, batch_size=512, shuffle=True)
@@ -129,51 +127,74 @@ def main():
     outputsG0 = np.concatenate(outputsG0)
     outputsG1 = np.concatenate(outputsG1)
 
-    n_bins = 2*args.n_cost_bins
+    n_bins = 2*n_cost_bins
     counts, _ = np.histogram(outputsG0, bins=n_bins, range=(0, 1))
     relative_frequenciesG0 = counts / sum(counts)
     counts, _ = np.histogram(outputsG1, bins=n_bins, range=(0, 1))
     relative_frequenciesG1 = counts / sum(counts)
 
-    prob_rej_0 = np.sum(relative_frequenciesG0[0:args.n_cost_bins])
+    prob_rej_0 = np.sum(relative_frequenciesG0[0:n_cost_bins])
     prob_acc_0 = 1-prob_rej_0
-    prob_rej_1 = np.sum(relative_frequenciesG1[0:args.n_cost_bins])
+    prob_rej_1 = np.sum(relative_frequenciesG1[0:n_cost_bins])
     prob_acc_1 = 1-prob_rej_1
 
-    probs_rej_0 = relative_frequenciesG0[:args.n_cost_bins]/prob_rej_0
-    probs_acc_0 = relative_frequenciesG0[args.n_cost_bins:]/prob_acc_0
-    probs_rej_1 = relative_frequenciesG1[:args.n_cost_bins]/prob_rej_1
-    probs_acc_1 = relative_frequenciesG1[args.n_cost_bins:]/prob_acc_1
+    probs_rej_0 = relative_frequenciesG0[:n_cost_bins]/prob_rej_0
+    probs_acc_0 = relative_frequenciesG0[n_cost_bins:]/prob_acc_0
+    probs_rej_1 = relative_frequenciesG1[:n_cost_bins]/prob_rej_1
+    probs_acc_1 = relative_frequenciesG1[n_cost_bins:]/prob_acc_1
 
 
     # print(relative_frequenciesG0)
     # print(relative_frequenciesG1)
 
-    output_str = f"{args.T} {args.n_cost_bins} {args.dp_epsilon}\n"
-    for i in range(1,args.n_cost_bins+1):
+    min_acc_rate = 0
+    max_acc_rate = 1
+    buff_gAacc = 0
+    buff_gAseen = 0
+    buff_gBacc = 0
+    buff_gBseen = 0
+
+    dp_epsilon_str = f"{dp_epsilon:.4f}".split('.')[1]
+    output_str = f"{time_horizon} {n_cost_bins} {dp_epsilon} {min_acc_rate} {max_acc_rate}\n"
+    output_str += f"{buff_gAacc} {buff_gAseen} {buff_gBacc} {buff_gBseen}\n"
+    for i in range(1,n_cost_bins+1):
         output_str += f"{(1/n_bins)*(i-0.5):.4f} "
     output_str += "\n"
 
-    for i in range(args.n_cost_bins):
-        output_str += f"{probs_rej_0[i]*probGroup0:.5f} "
-    output_str += "\n"
-    for i in range(args.n_cost_bins):
-        output_str += f"{probs_acc_0[i]*probGroup0:.5f} "
-    output_str += "\n"
-    for i in range(args.n_cost_bins):
-        output_str += f"{probs_rej_1[i]*probGroup1:.5f} "
-    output_str += "\n"
-    for i in range(args.n_cost_bins):
-        output_str += f"{probs_acc_1[i]*probGroup1:.5f} "
+    if cost == "constant":
+        for i in range(n_cost_bins):
+            output_str += f"{prob_rej_0*(1/n_cost_bins)*probGroup0:.5f} "
+        output_str += "\n"
+        for i in range(n_cost_bins):
+            output_str += f"{prob_acc_0*(1/n_cost_bins)*probGroup0:.5f} "
+        output_str += "\n"
+        for i in range(n_cost_bins):
+            output_str += f"{prob_rej_1*(1/n_cost_bins)*probGroup1:.5f} "
+        output_str += "\n"
+        for i in range(n_cost_bins):
+            output_str += f"{prob_acc_1*(1/n_cost_bins)*probGroup1:.5f} "
     
-    tmp_input_path = "cpp_inputs/prova_input.txt"
-    tmp_saved_policy_path = "experimental_results/prova_policy.txt"
+    elif cost == "paired":
+        for i in range(n_cost_bins):
+            output_str += f"{prob_rej_0*probs_rej_0[i]*probGroup0:.5f} "
+        output_str += "\n"
+        for i in range(n_cost_bins):
+            output_str += f"{prob_acc_0*probs_acc_0[i]*probGroup0:.5f} "
+        output_str += "\n"
+        for i in range(n_cost_bins):
+            output_str += f"{prob_rej_1*probs_rej_1[i]*probGroup1:.5f} "
+        output_str += "\n"
+        for i in range(n_cost_bins):
+            output_str += f"{prob_acc_1*probs_acc_1[i]*probGroup1:.5f} "
+    clean_ml_model = ml_model.split('/')[-1].split('.')[0]
+    tmp_input_path = f"cpp_inputs/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}.txt"
+    tmp_saved_policy_path = f"experimental_results/dp_enforcer_policies/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}.txt"
     with open(tmp_input_path, "w") as fp:
         fp.write(output_str)
 
 
     # Command and arguments
-    command = ['./a.out', '--save_policy', f'--saved_policy_file={tmp_saved_policy_path}']
+    command = ['./dp_enforcer.o', '--save_policy', f'--saved_policy_file={tmp_saved_policy_path}']
 
     # Open the input file
     with open(tmp_input_path, 'r') as input_file:
@@ -204,4 +225,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()    
+    main(args.ml_model, args.dataset, args.sensitive_attr, args.time_horizon, args.n_cost_bins, args.dp_epsilon, args.cost)
