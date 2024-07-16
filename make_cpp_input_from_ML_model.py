@@ -2,7 +2,7 @@ import torch
 import argparse
 import numpy as np
 import pandas as pd
-from ffb.utils import PandasDataSet
+from ffb.utils import PandasDataSet, seed_everything
 from torch.utils.data import DataLoader
 from sklearn.preprocessing import StandardScaler
 import subprocess
@@ -226,4 +226,5 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
 
 if __name__ == "__main__":
     args = parse_args()    
+    seed_everything(0)
     main(args.ml_model, args.dataset, args.sensitive_attr, args.time_horizon, args.n_cost_bins, args.dp_epsilon, args.cost)
