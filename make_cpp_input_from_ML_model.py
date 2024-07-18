@@ -137,11 +137,16 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
     prob_acc_0 = 1-prob_rej_0
     prob_rej_1 = np.sum(relative_frequenciesG1[0:n_cost_bins])
     prob_acc_1 = 1-prob_rej_1
+    
+    prob_rej_0_norm_factor = 0 if prob_rej_0 == 0 else 1/prob_rej_0
+    prob_acc_0_norm_factor = 0 if prob_acc_0 == 0 else 1/prob_acc_0
+    prob_rej_1_norm_factor = 0 if prob_rej_1 == 0 else 1/prob_rej_1
+    prob_acc_1_norm_factor = 0 if prob_acc_1 == 0 else 1/prob_acc_1
 
-    probs_rej_0 = relative_frequenciesG0[:n_cost_bins]/prob_rej_0
-    probs_acc_0 = relative_frequenciesG0[n_cost_bins:]/prob_acc_0
-    probs_rej_1 = relative_frequenciesG1[:n_cost_bins]/prob_rej_1
-    probs_acc_1 = relative_frequenciesG1[n_cost_bins:]/prob_acc_1
+    probs_rej_0 = prob_rej_0_norm_factor*relative_frequenciesG0[:n_cost_bins]
+    probs_acc_0 = prob_acc_0_norm_factor*relative_frequenciesG0[n_cost_bins:]
+    probs_rej_1 = prob_rej_1_norm_factor*relative_frequenciesG1[:n_cost_bins]
+    probs_acc_1 = prob_acc_1_norm_factor*relative_frequenciesG1[n_cost_bins:]
 
 
     # print(relative_frequenciesG0)
@@ -226,5 +231,5 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
 
 if __name__ == "__main__":
     args = parse_args()    
-    seed_everything(0)
+    # seed_everything(0)
     main(args.ml_model, args.dataset, args.sensitive_attr, args.time_horizon, args.n_cost_bins, args.dp_epsilon, args.cost)

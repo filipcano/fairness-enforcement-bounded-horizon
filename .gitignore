@@ -8,3 +8,7 @@ datasets/*/*
 *.ipynb_checkpoints*
 *.out
 experimental_results/ML_models/*
+experimental_results/simulation_results/*
+experimental_results/dp_enforcer_policies/*
+cpp_inputs/*
+

@@ -1,0 +1,47 @@
+{
+    "dataset_env" : [
+        {
+            "dataset" : "adult", 
+            "target_attr" : "income",
+            "sensitive_attr" : "race"
+        },
+        {
+            "dataset" : "adult", 
+            "target_attr" : "income",
+            "sensitive_attr" : "sex"
+        },
+        {
+            "dataset" : "german", 
+            "target_attr" : "credit",
+            "sensitive_attr" : "sex"
+        },
+        {
+            "dataset" : "german", 
+            "target_attr" : "credit",
+            "sensitive_attr" : "age"
+        },
+        {
+            "dataset" : "bank_marketing", 
+            "target_attr" : "y",
+            "sensitive_attr" : "age"
+        },
+        {
+            "dataset" : "compas", 
+            "target_attr" : "two_year_recid",
+            "sensitive_attr" : "sex"
+        },
+        {
+            "dataset" : "compas", 
+            "target_attr" : "two_year_recid",
+            "sensitive_attr" : "race"
+        }
+    ],
+
+    "ml_models" : ["adv_gr", "diffdp", "erm", "hsic", "laftr", "pr"],
+    "costs" : ["constant", "paired"],
+    "lambda_decision" : [0, 0.5, 1],
+    "time_horizon" : [100],
+    "n_simulations" : 10, 
+    "dp_thresholds" : [0.1, 0.2, 0.3],
+    "n_cost_bins" : 10
+}

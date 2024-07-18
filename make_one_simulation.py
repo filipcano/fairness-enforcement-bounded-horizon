@@ -3,14 +3,15 @@ import argparse
 import numpy as np
 import pandas as pd
 from ffb.utils import PandasDataSet, seed_everything
-from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-import sys
+import sys, os
 sys.path.append('ffb')
 
 from ffb.dataset import load_adult_data, load_german_data, load_compas_data, load_bank_marketing_data
 from ffb.utils import InfiniteDataLoader
+
+import make_cpp_input_from_ML_model
 
 
 def parse_val_table(val_table_filepath, time_horizon):
@@ -32,16 +33,29 @@ def parse_args():
     parser.add_argument("--time_horizon", type=int, default=100, help="Time horizon for fairness properties")
     parser.add_argument("--n_cost_bins", type=int, default=10, help="Number of bins for the cost")
     parser.add_argument("--dp_epsilon", type=float, default=0.15, help="Bound on demographic parity")
+    parser.add_argument("--lambda_decision", type=float, default=1, help="Probability of accepting the shield recommendation")
+    parser.add_argument("--cost-type", type=str, default="paired", choices=["constant", "paired"], 
+                        help="Cost for each decision. Can be constant or paired with using the provided ML model")
     return parser.parse_args()
 
 
 
-def load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon):
+def load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost_type, debug = 1):
     dp_epsilon_str = f"{dp_epsilon:.4f}".split('.')[1]
     clean_ml_model = ml_model.split('/')[-1].split('.')[0]
-    print(clean_ml_model)
+    if debug > 1:
+        print(clean_ml_model)
 
-    shield_df = pd.read_csv(f"experimental_results/dp_enforcer_policies/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}.txt", delim_whitespace=True, header=None, 
+    shield_filepath = f"experimental_results/dp_enforcer_policies/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}.txt"
+
+    if not os.path.isfile(shield_filepath):
+        if debug > 0:
+           print("Shield did not exist, starting computing...")
+        make_cpp_input_from_ML_model.main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost_type)
+
+
+
+    shield_df = pd.read_csv(shield_filepath, delim_whitespace=True, header=None, 
                  names=['rem_dec', 'gAseen', 'gAacc', 'gBacc', 'val'])
     
     shield_df['gBseen'] = time_horizon - shield_df['rem_dec'] - shield_df['gAseen']
@@ -73,7 +87,7 @@ def make_one_simulation(net, data_loader, shield_df, dp_threshold, time_horizon,
     lambda_decision: when expected cost of changing the ML decision is smaller than the expected cost of keeping, the decision will be changed with probability lambda_decision.
     """
 
-    print(f"{dp_threshold=}")
+    # print(f"{dp_threshold=}")
 
     log_gAseen = []
     log_gAacc = []
@@ -182,22 +196,26 @@ def make_one_simulation(net, data_loader, shield_df, dp_threshold, time_horizon,
 
 
 
-def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold):
+def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, debug=1):
     net = torch.load(ml_model)
     if dataset == "adult":
-        print(f"Dataset: adult")
+        if debug > 0:
+            print(f"Dataset: adult")
         X, y, s = load_adult_data(path="datasets/adult/raw", sensitive_attribute=sensitive_attr)
 
     elif dataset == "german":
-        print(f"Dataset: german")
+        if debug > 0:
+            print(f"Dataset: german")
         X, y, s = load_german_data(path="datasets/german/raw", sensitive_attribute=sensitive_attr)
 
     elif dataset == "compas":
-        print(f"Dataset: compas")
+        if debug > 0:
+            print(f"Dataset: compas")
         X, y, s = load_compas_data(path="datasets/compas/raw", sensitive_attribute=sensitive_attr)
 
     elif dataset == "bank_marketing":
-        print(f"Dataset: bank_marketing")
+        if debug > 0:
+            print(f"Dataset: bank_marketing")
         X, y, s = load_bank_marketing_data(path="datasets/bank_marketing/raw", sensitive_attribute=sensitive_attr)
 
     else:
@@ -228,16 +246,18 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_thresh
     data = PandasDataSet(X, y, s)
     loader = InfiniteDataLoader(data, batch_size=1, shuffle=True, drop_last=True)
 
-    shield_df = load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold)
+    shield_df = load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, debug=debug)
 
 
     res_df = make_one_simulation(net, data, shield_df, dp_threshold, time_horizon)
 
     res_df['dp'] = np.abs(res_df['gAacc']/(1+res_df['gAseen']) - res_df['gBacc']/(1+res_df['gBseen']))
     pd.set_option('display.max_rows', None)
-    print(res_df.tail(1))
-    print("cost: ", res_df['cost'].sum())
-    print("utility: ", res_df['utility'].sum())
+    if debug > 1:
+        print(res_df.tail(1))
+        print("cost: ", res_df['cost'].sum())
+        print("utility: ", res_df['utility'].sum())
+    return res_df
 
 
 
@@ -248,4 +268,4 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_thresh
 if __name__ == "__main__":
     args = parse_args()
     # seed_everything(0)
-    main(args.ml_model, args.dataset, args.sensitive_attr, args.time_horizon, args.n_cost_bins, args.dp_epsilon)
+    main(args.ml_model, args.dataset, args.sensitive_attr, args.time_horizon, args.n_cost_bins, args.dp_epsilon, args.cost_type, args.lambda_decision)
