@@ -48,6 +48,8 @@ def assert_input_integrity(dataset, sensitive_attr, ml_model):
 
 def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost):
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     sensitive_attr = assert_input_integrity(dataset, sensitive_attr, ml_model)
 
     net = torch.load(ml_model)
@@ -117,12 +119,12 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
     outputsG1 = []
 
     for data, target, sensitive in loader0:
-        h, output = net(data)
-        outputsG0.append(output.detach().numpy())
+        h, output = net(data.to(device))
+        outputsG0.append(output.detach().cpu().numpy())
     
     for data, target, sensitive in loader1:
-        h, output = net(data)
-        outputsG1.append(output.detach().numpy())
+        h, output = net(data.to(device))
+        outputsG1.append(output.detach().cpu().numpy())
 
     outputsG0 = np.concatenate(outputsG0)
     outputsG1 = np.concatenate(outputsG1)

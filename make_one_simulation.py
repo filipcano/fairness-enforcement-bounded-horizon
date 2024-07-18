@@ -86,7 +86,7 @@ def make_one_simulation(net, data_loader, shield_df, dp_threshold, time_horizon,
     n_windows: how many windows of size time_horizon to simulate
     lambda_decision: when expected cost of changing the ML decision is smaller than the expected cost of keeping, the decision will be changed with probability lambda_decision.
     """
-
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     # print(f"{dp_threshold=}")
 
     log_gAseen = []
@@ -105,8 +105,8 @@ def make_one_simulation(net, data_loader, shield_df, dp_threshold, time_horizon,
         
         if step > time_horizon:
             break
-        h, output = net(x)
-        score = output.detach().numpy()[0]
+        h, output = net(x.to(device))
+        score = output.detach().cpu().numpy()[0]
         net_proposes_accept = score > 0.5
         cost_of_intervention = np.abs(score - 0.5)
 
