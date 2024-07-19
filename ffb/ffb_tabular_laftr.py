@@ -271,4 +271,4 @@ if __name__ == '__main__':
             i += 1
         model_name = add_numbering(model_name, i)
     
-    torch.save(classifier, model_name)
+    torch.save(laftr, model_name)

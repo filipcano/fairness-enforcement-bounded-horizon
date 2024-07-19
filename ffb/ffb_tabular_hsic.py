@@ -87,7 +87,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_path", type=str, default="../datasets/adult/raw")
     parser.add_argument("--dataset", type=str,default="adult",choices=["adult","kdd","acs","german", "compas" ,"bank_marketing"], help="e.g. adult,kdd,acs,german,compas,bank_marketing")
-    parser.add_argument("--model", type=str, default="diffdp")
+    parser.add_argument("--model", type=str, default="hsic")
     parser.add_argument("--target_attr", type=str, default="income")
     parser.add_argument("--sensitive_attr", type=str, default="sex")
     parser.add_argument("--evaluation_metrics", type=str, default="acc,ap,dp,eopp,eodd", help="e.g. acc,ap,dp")

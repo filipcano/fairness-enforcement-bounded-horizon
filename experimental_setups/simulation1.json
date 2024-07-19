@@ -1,5 +1,5 @@
 {
-    "dataset_env" : [
+    "no_dataset_env" : [
         {
             "dataset" : "adult", 
             "target_attr" : "income",
@@ -9,7 +9,9 @@
             "dataset" : "adult", 
             "target_attr" : "income",
             "sensitive_attr" : "sex"
-        },
+        }
+    ],
+    "dataset_env" : [
         {
             "dataset" : "german", 
             "target_attr" : "credit",
