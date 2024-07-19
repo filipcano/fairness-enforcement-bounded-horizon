@@ -11,4 +11,5 @@ experimental_results/ML_models/*
 experimental_results/simulation_results/*
 experimental_results/dp_enforcer_policies/*
 cpp_inputs/*
-
+*.o
+limits_experiments/*
