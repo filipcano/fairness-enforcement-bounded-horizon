@@ -104,9 +104,9 @@ if __name__ == '__main__':
     parser.add_argument("--evaluation_metrics", type=str, default="acc,ap,dp,eopp,eodd", help="e.g. acc,ap,dp")
     parser.add_argument("--log_freq", type=int, default=1)
 
-    parser.add_argument("--A_x", type=float, default=0.1)
-    parser.add_argument("--A_y", type=float, default=1.0)
-    parser.add_argument("--A_z", type=float, default=5.0)
+    parser.add_argument("--A_x", type=float, default=0.2) # Filip: changed Ax, Ay, Az from original FFB
+    parser.add_argument("--A_y", type=float, default=0.2)
+    parser.add_argument("--A_z", type=float, default=0.2)
 
     parser.add_argument("--num_training_steps", type=int, default=150)
     parser.add_argument("--batch_size", type=int, default=1024)
@@ -271,4 +271,4 @@ if __name__ == '__main__':
             i += 1
         model_name = add_numbering(model_name, i)
     
-    torch.save(classifier, model_name)
+    torch.save(laftr, model_name)
