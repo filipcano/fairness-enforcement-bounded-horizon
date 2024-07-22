@@ -1,0 +1,32 @@
+T X eps alpha beta
+buff_gAacc, buff_gAseen, buff_gBacc, buff_gBseen
+N_1 ... N_X
+Prob_A_rej_1 ... Prob_A_rej_X
+Prob_A_acc_1 ... Prob_A_acc_X
+Prob_B_rej_1 ... Prob_B_rej_X
+Prob_B_acc_1 ... Prob_B_acc_X
+
+
+##############
+T: time horizon
+X: number of different costs
+eps: DP threshold
+alpha: minimum viable acceptance rate, default value 0
+beta: maximum viable acceptance rate, default value 1
+
+If alpha = 0 and beta = 1, the specification is normal DP. Also, it happens that DP < beta - alpha.
+
+buff_gAacc, buff_gAseen, buff_gBacc, buff_gBseen are values to be added to the DP. If they are non-zero, the specification is of the type "buffered DP". Default value is 0 for all.
+
+N_i is the i-th index cost. The costs are floats, but there is a discrete number of different costs (given by X).
+
+Prob_G_acc_i is the probability that an instance comes from Group G, the ML classifier proposes accept, and the cost of changing such decision is N_i.
+
+Prob_G_rej_i is the probability that an instance comes from Group G, the ML classifier proposes reject, and the cost of changing such decision is N_i.
+
+Prob_G_rej_1 + ... + Prob_G_rej_X = Prob(reject, Group = G)
+Prob_G_acc_1 + ... + Prob_G_acc_X = Prob(accept, Group = G)
+
+Prob(reject, Group = G) + Prob(accept, Group = G) = Prob(Group = G)
+
+Prob(Group = A) + Prob(Group = B) = 1
