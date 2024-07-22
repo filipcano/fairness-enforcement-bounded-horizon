@@ -52,8 +52,8 @@
     "ml_algos" : ["adv", "diffdp", "erm", "hsic", "laftr", "pr"],
     "costs" : ["constant", "paired"],
     "lambda_decision" : [0, 0.5, 1],
-    "time_horizon" : [200],
-    "n_simulations" : 100, 
-    "dp_thresholds" : [0.05, 0.1, 0.15, 0.2],
+    "time_horizon" : [150],
+    "n_simulations" : 50, 
+    "dp_thresholds" : [0.05, 0.1, 0.15],
     "n_cost_bins" : 10
 }

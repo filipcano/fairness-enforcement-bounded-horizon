@@ -46,7 +46,7 @@ def assert_input_integrity(dataset, sensitive_attr, ml_model):
     raise ValueError(f"Unknown dataset: {dataset}")
 
 
-def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost, debug=1):
+def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost_type, debug=1):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -79,7 +79,7 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
     if debug > 1:
-        print(f"{ml_model=}, {sensitive_attr=}, {time_horizon=}, {n_cost_bins=}, {dp_epsilon=}, {cost=}")
+        print(f"{ml_model=}, {sensitive_attr=}, {time_horizon=}, {n_cost_bins=}, {dp_epsilon=}, {cost_type=}")
 
     ml_algo = ml_model.split('/')[-1].split('_')[2 + len(dataset.split('_'))].split('.')[0]
     
@@ -183,7 +183,7 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
         output_str += f"{(1/n_bins)*(i-0.5):.4f} "
     output_str += "\n"
 
-    if cost == "constant":
+    if cost_type == "constant":
         for i in range(n_cost_bins):
             output_str += f"{0.5*probGroup0:.5f} "
         output_str += "\n"
@@ -196,7 +196,7 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
         for i in range(n_cost_bins):
             output_str += f"{0.5*probGroup1:.5f} "
 
-    elif cost == "hybrid":
+    elif cost_type == "hybrid":
         for i in range(n_cost_bins):
             output_str += f"{prob_rej_0*(1/n_cost_bins)*probGroup0:.5f} "
         output_str += "\n"
@@ -209,7 +209,7 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
         for i in range(n_cost_bins):
             output_str += f"{prob_acc_1*(1/n_cost_bins)*probGroup1:.5f} "
     
-    elif cost == "paired":
+    elif cost_type == "paired":
         for i in range(n_cost_bins):
             output_str += f"{prob_rej_0*probs_rej_0[i]*probGroup0:.5f} "
         output_str += "\n"
@@ -222,8 +222,8 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
         for i in range(n_cost_bins):
             output_str += f"{prob_acc_1*probs_acc_1[i]*probGroup1:.5f} "
     clean_ml_model = ml_model.split('/')[-1].split('.')[0]
-    tmp_input_path = f"cpp_inputs/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}.txt"
-    tmp_saved_policy_path = f"experimental_results/dp_enforcer_policies/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}_{cost}.txt"
+    tmp_input_path = f"cpp_inputs/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}_{cost_type}.txt"
+    tmp_saved_policy_path = f"experimental_results/dp_enforcer_policies/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}_{cost_type}.txt"
     with open(tmp_input_path, "w") as fp:
         fp.write(output_str)
 

@@ -65,10 +65,10 @@ def main_parallel(params): # parallel version
                                 task = (ml_model, ml_algo, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, idx_simul)
                                 tasks.append(task)
 
-    with tqdm(total=total_iterations) as pbar:
-        with Pool(processes=int(multiprocessing.cpu_count()/2)) as pool:
-            for _ in pool.imap_unordered(run_simulation, tasks):
-                pbar.update(1)
+    # with tqdm(total=total_iterations) as pbar:
+    #     with Pool(processes=int(multiprocessing.cpu_count()/2)) as pool:
+    #         for _ in pool.imap_unordered(run_simulation, tasks):
+    #             pbar.update(1)
 
 
     # with tqdm(total=total_iterations) as pbar:
@@ -80,6 +80,13 @@ def main_parallel(params): # parallel version
     #             pool.apply_async(run_simulation, args=(task,), callback=lambda _: pbar.update(1))
     #         pool.close()
     #         pool.join()
+
+    with tqdm(total=total_iterations) as pbar:
+        with Pool(processes=int(multiprocessing.cpu_count()/3)) as pool:
+            for task in tasks:
+                pool.apply_async(run_simulation, args=(task,), callback=lambda _: pbar.update(1))
+            pool.close()
+            pool.join()
 
 
 def main_sequential(params): # sequential version
@@ -121,5 +128,5 @@ if __name__ == "__main__":
     # params_sequential = params.copy()
     # params_sequential["n_simulations"] = 1
     # main_sequential(params_sequential)
-    # params["n_simulations"] -= 1
+    
     main_parallel(params)
