@@ -46,12 +46,12 @@ def load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins,
     if debug > 1:
         print(clean_ml_model)
 
-    shield_filepath = f"experimental_results/dp_enforcer_policies/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}.txt"
+    shield_filepath = f"experimental_results/dp_enforcer_policies/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}_{cost_type}.txt"
 
     if not os.path.isfile(shield_filepath):
         if debug > 0:
            print("Shield did not exist, starting computing...")
-        make_cpp_input_from_ML_model.main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost_type)
+        make_cpp_input_from_ML_model.main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost_type, debug = debug)
 
 
 
@@ -77,7 +77,7 @@ def get_shield_value(df, gAseen, gAacc, gBseen, gBacc, dp_threshold):
     return np.inf
 
 
-def make_one_simulation(net, data_loader, shield_df, dp_threshold, time_horizon, n_windows = 1, lambda_decision = 1):
+def make_one_simulation(net, ml_algo, data_loader, shield_df, dp_threshold, time_horizon, n_windows = 1, lambda_decision = 1):
     """
     net: ML classifier
     data_loader: infinite data loader with the test split of the dataset, shuffle=True, batch_size = 1
@@ -105,7 +105,11 @@ def make_one_simulation(net, data_loader, shield_df, dp_threshold, time_horizon,
         
         if step > time_horizon:
             break
-        h, output = net(x.to(device))
+        if ml_algo == "laftr":
+            h, decoded, output, adv_pred = net(x.to(device), s.to(device))
+        else:
+            h, output = net(x.to(device))
+            
         score = output.detach().cpu().numpy()[0]
         net_proposes_accept = score > 0.5
         cost_of_intervention = np.abs(score - 0.5)
@@ -197,6 +201,7 @@ def make_one_simulation(net, data_loader, shield_df, dp_threshold, time_horizon,
 
 
 def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, debug=1):
+
     net = torch.load(ml_model)
     if dataset == "adult":
         if debug > 0:
@@ -221,6 +226,8 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_thresh
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
     
+
+    ml_algo = ml_model.split('/')[-1].split('_')[2 + len(dataset.split('_'))].split('.')[0]
     categorical_cols = X.select_dtypes("string").columns
     if len(categorical_cols) > 0:
         X = pd.get_dummies(X, columns=categorical_cols)
@@ -249,7 +256,7 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_thresh
     shield_df = load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, debug=debug)
 
 
-    res_df = make_one_simulation(net, data, shield_df, dp_threshold, time_horizon)
+    res_df = make_one_simulation(net, ml_algo, data, shield_df, dp_threshold, time_horizon, lambda_decision=lambda_decision)
 
     res_df['dp'] = np.abs(res_df['gAacc']/(1+res_df['gAseen']) - res_df['gBacc']/(1+res_df['gBseen']))
     pd.set_option('display.max_rows', None)

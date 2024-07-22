@@ -46,7 +46,7 @@ def assert_input_integrity(dataset, sensitive_attr, ml_model):
     raise ValueError(f"Unknown dataset: {dataset}")
 
 
-def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost):
+def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost, debug=1):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -57,23 +57,31 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
     
     
     if dataset == "adult":
-        print(f"Dataset: adult")
+        if debug > 0:
+            print(f"Dataset: adult")
         X, y, s = load_adult_data(path="datasets/adult/raw", sensitive_attribute=sensitive_attr)
 
     elif dataset == "german":
-        print(f"Dataset: german")
+        if debug > 0:
+            print(f"Dataset: german")
         X, y, s = load_german_data(path="datasets/german/raw", sensitive_attribute=sensitive_attr)
 
     elif dataset == "compas":
-        print(f"Dataset: compas")
+        if debug > 0:
+            print(f"Dataset: compas")
         X, y, s = load_compas_data(path="datasets/compas/raw", sensitive_attribute=sensitive_attr)
 
     elif dataset == "bank_marketing":
-        print(f"Dataset: bank_marketing")
+        if debug > 0:
+            print(f"Dataset: bank_marketing")
         X, y, s = load_bank_marketing_data(path="datasets/bank_marketing/raw", sensitive_attribute=sensitive_attr)
 
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
+    if debug > 1:
+        print(f"{ml_model=}, {sensitive_attr=}, {time_horizon=}, {n_cost_bins=}, {dp_epsilon=}, {cost=}")
+
+    ml_algo = ml_model.split('/')[-1].split('_')[2 + len(dataset.split('_'))].split('.')[0]
     
     categorical_cols = X.select_dtypes("string").columns
     if len(categorical_cols) > 0:
@@ -119,11 +127,18 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
     outputsG1 = []
 
     for data, target, sensitive in loader0:
-        h, output = net(data.to(device))
+
+        if ml_algo == "laftr":
+            h, decoded, output, adv_pred = net(data.to(device), sensitive.to(device))
+        else:
+            h, output = net(data.to(device))
         outputsG0.append(output.detach().cpu().numpy())
     
     for data, target, sensitive in loader1:
-        h, output = net(data.to(device))
+        if ml_algo == "laftr":
+            h, decoded, output, adv_pred = net(data.to(device), sensitive.to(device))
+        else:
+            h, output = net(data.to(device))
         outputsG1.append(output.detach().cpu().numpy())
 
     outputsG0 = np.concatenate(outputsG0)
@@ -170,6 +185,19 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
 
     if cost == "constant":
         for i in range(n_cost_bins):
+            output_str += f"{0.5*probGroup0:.5f} "
+        output_str += "\n"
+        for i in range(n_cost_bins):
+            output_str += f"{0.5*probGroup0:.5f} "
+        output_str += "\n"
+        for i in range(n_cost_bins):
+            output_str += f"{0.5*probGroup1:.5f} "
+        output_str += "\n"
+        for i in range(n_cost_bins):
+            output_str += f"{0.5*probGroup1:.5f} "
+
+    elif cost == "hybrid":
+        for i in range(n_cost_bins):
             output_str += f"{prob_rej_0*(1/n_cost_bins)*probGroup0:.5f} "
         output_str += "\n"
         for i in range(n_cost_bins):
@@ -195,7 +223,7 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
             output_str += f"{prob_acc_1*probs_acc_1[i]*probGroup1:.5f} "
     clean_ml_model = ml_model.split('/')[-1].split('.')[0]
     tmp_input_path = f"cpp_inputs/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}.txt"
-    tmp_saved_policy_path = f"experimental_results/dp_enforcer_policies/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}.txt"
+    tmp_saved_policy_path = f"experimental_results/dp_enforcer_policies/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}_{cost}.txt"
     with open(tmp_input_path, "w") as fp:
         fp.write(output_str)
 
@@ -214,7 +242,8 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
         )
 
     # Print the outputs and errors, if any
-    print("Output:", result.stdout)
+    if debug > 0:
+        print("Output:", result.stdout)
     
 
 
