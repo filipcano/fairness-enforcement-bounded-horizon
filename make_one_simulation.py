@@ -5,7 +5,7 @@ import pandas as pd
 from ffb.utils import PandasDataSet, seed_everything
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-import sys, os
+import sys, os, pathlib, time
 sys.path.append('ffb')
 
 from ffb.dataset import load_adult_data, load_german_data, load_compas_data, load_bank_marketing_data
@@ -48,13 +48,24 @@ def load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins,
 
     shield_filepath = f"experimental_results/dp_enforcer_policies/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}_{cost_type}.txt"
 
+    # if the shield does not exist, it computes it. For parallel executions, if the shield is not there, touches it first before starting the computation, so others can wait for it
+
     if not os.path.isfile(shield_filepath):
+        pathlib.Path(shield_filepath).touch()
         if debug > 0:
            print("Shield did not exist, starting computing...")
         make_cpp_input_from_ML_model.main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost_type, debug = debug)
 
+    # if the file exists, but it's empty, wait 3s to see if someone else computes it. Eventually stop and raise an error if you waited too much
+    max_time_asleep = 3600
+    time_waited = 0
+    while (time_waited < max_time_asleep) and (os.stat(shield_filepath).st_size == 0):
+        time.sleep(3)
+        time_waited += 3
 
-
+    if time_waited >= max_time_asleep:
+        raise Exception("Waited for more than 1 hour for shield to be computed!")
+    
     shield_df = pd.read_csv(shield_filepath, delim_whitespace=True, header=None, 
                  names=['rem_dec', 'gAseen', 'gAacc', 'gBacc', 'val'])
     

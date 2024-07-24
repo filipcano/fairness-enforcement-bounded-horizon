@@ -185,16 +185,16 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
 
     if cost_type == "constant":
         for i in range(n_cost_bins):
-            output_str += f"{0.5*probGroup0:.5f} "
+            output_str += f"{0.5*probGroup0*(1/n_cost_bins):.5f} "
         output_str += "\n"
         for i in range(n_cost_bins):
-            output_str += f"{0.5*probGroup0:.5f} "
+            output_str += f"{0.5*probGroup0*(1/n_cost_bins):.5f} "
         output_str += "\n"
         for i in range(n_cost_bins):
-            output_str += f"{0.5*probGroup1:.5f} "
+            output_str += f"{0.5*probGroup1*(1/n_cost_bins):.5f} "
         output_str += "\n"
         for i in range(n_cost_bins):
-            output_str += f"{0.5*probGroup1:.5f} "
+            output_str += f"{0.5*probGroup1*(1/n_cost_bins):.5f} "
 
     elif cost_type == "hybrid":
         for i in range(n_cost_bins):
@@ -226,6 +226,10 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
     tmp_saved_policy_path = f"experimental_results/dp_enforcer_policies/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}_{cost_type}.txt"
     with open(tmp_input_path, "w") as fp:
         fp.write(output_str)
+
+    # print("CPP input start:")
+    # print(output_str)
+    # print("CPP input end")
 
 
     # Command and arguments

@@ -30,6 +30,23 @@ typedef vector<V4D> V5D;
 // typedef vector<V8D> V9D;
 
 
+
+float custom_multiply(float a, float b) {
+    //multiply two floats, with inf*0 = inf
+    if (std::isinf(a) && b == 0.0f) {
+        return std::numeric_limits<float>::infinity();
+    } else if (std::isinf(b) && a == 0.0f) {
+        return std::numeric_limits<float>::infinity();
+    } else {
+        float result = a * b;
+        if (a != 0.0f && b != 0.0f && result == 0.0f) {
+            // Return the smallest positive normal float
+            return std::numeric_limits<float>::min();
+        }
+        return result;
+    }
+}
+
 int sampleNumber(const std::vector<float>& probabilities) {
     // returns an int between 0 and probabilities.size()-1
 
@@ -211,7 +228,7 @@ void DPEnforcerMinCost::save_val_to_file(string filename) {
                             int gAacc = i3;
                             int gBacc = i4;
                             int gBseen = T - i1 - gAseen;
-                            float dp = abs((float)gAacc/(1+gAseen) - (float)gBacc/(1+gBseen));
+                            float dp = abs((float)gAacc/(1.0+gAseen) - (float)gBacc/(1.0+gBseen));
                             if (dp < eps) print = true;
                             else print = false;
                         }
@@ -302,8 +319,9 @@ float DPEnforcerMinCost::Val(int t, int gAseen, int gAacc, int gBacc) {
     int gBseen = (T-t)-gAseen;
     if (t == 0) {
         float bias = compute_dp(gAseen, gAacc, gBseen, gBacc);
-        bool accRateA = (alpha*gAseen <= gAacc) and (gAacc <= beta*gAseen);
-        bool accRateB = (alpha*gBseen <= gBacc) and (gBacc <= beta*gBseen);
+        // bool accRateA = (alpha*gAseen <= gAacc) and (gAacc <= beta*gAseen);
+        bool accRateA = (custom_multiply(alpha,gAseen) <= gAacc) and (gAacc <= custom_multiply(beta,gAseen));
+        bool accRateB = (custom_multiply(alpha,gBseen) <= gBacc) and (gBacc <= custom_multiply(beta,gBseen));
 
         if ((bias < eps) and accRateA and accRateB) {
             return res = 0;
@@ -334,7 +352,7 @@ float DPEnforcerMinCost::Val(int t, int gAseen, int gAacc, int gBacc) {
                     accept = N[k] + Val(t-1, gAseen, gAacc, gBacc+1);
                     reject = Val(t-1, gAseen, gAacc, gBacc);
                 }
-                res += Prob[t][group][decision][k]*min(accept, reject);
+                res += custom_multiply(Prob[t][group][decision][k],min(accept, reject));
             }
         }
     }
@@ -376,5 +394,6 @@ int main(int argc, char **argv) {
     cout << "Optimized Elapsed time: " << elapsed_time_ms/1000 << " seconds" << endl;
     PrintMemoryInfo("Optimized");
     if (save_policy) FA.save_val_to_file(filename);
+    
 
 }

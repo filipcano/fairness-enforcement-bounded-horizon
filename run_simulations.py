@@ -82,7 +82,7 @@ def main_parallel(params): # parallel version
     #         pool.join()
 
     with tqdm(total=total_iterations) as pbar:
-        with Pool(processes=int(multiprocessing.cpu_count()/3)) as pool:
+        with Pool(processes=multiprocessing.cpu_count()-1) as pool:
             for task in tasks:
                 pool.apply_async(run_simulation, args=(task,), callback=lambda _: pbar.update(1))
             pool.close()
