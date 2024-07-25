@@ -229,7 +229,7 @@ void DPEnforcerMinCost::save_val_to_file(string filename) {
                             int gBacc = i4;
                             int gBseen = T - i1 - gAseen;
                             float dp = abs((float)gAacc/(1.0+gAseen) - (float)gBacc/(1.0+gBseen));
-                            if (dp < eps) print = true;
+                            if (dp <= eps) print = true;
                             else print = false;
                         }
                         else if (val == defaultVal) print = false;

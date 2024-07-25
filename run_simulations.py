@@ -2,7 +2,7 @@ import argparse
 import numpy as np
 import pandas as pd
 from ffb.utils import PandasDataSet, seed_everything
-import json
+import json, os
 from tqdm import tqdm
 import multiprocessing
 from multiprocessing import Pool
@@ -41,8 +41,18 @@ def run_simulation(task):
     ml_model, ml_algo, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, idx_simul = task
     dp_threshold_str = f"{dp_threshold:.4f}".split('.')[1]
     res_df = make_one_simulation.main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, debug=0)
-    path_to_save = f"experimental_results/simulation_results/{dataset}_{sensitive_attr}_{ml_algo}_{time_horizon}_{cost_type}_{n_cost_bins}_{dp_threshold_str}_{lambda_decision}_{idx_simul}.csv"
-    res_df.to_csv(path_to_save)
+    res_df['sim_num'] = idx_simul
+    res_df['step'] = res_df.index
+    res_df['acc_util'] = res_df['utility'].cumsum()
+    res_df['acc_cost'] = res_df['cost'].cumsum()
+    res_df['intervention'] = (res_df['cost'] != 0).astype(int)
+    res_df['n_interventions'] = res_df['intervention'].cumsum()
+    path_to_save = f"experimental_results/simulation_results/{dataset}_{sensitive_attr}_{ml_algo}_{time_horizon}_{cost_type}_{n_cost_bins}_{dp_threshold_str}_{lambda_decision}.csv"
+    if os.path.isfile(path_to_save):
+        res_df.to_csv(path_to_save, mode='a', header=False, index=True)
+    else:
+        res_df.to_csv(path_to_save)
+
     return 1
 
 def main_parallel(params): # parallel version
@@ -51,17 +61,18 @@ def main_parallel(params): # parallel version
     print(f"{total_iterations=}")
 
     tasks = []
-    for dataset_env in params["dataset_env"]:
-        dataset = dataset_env["dataset"]
-        target_attr = dataset_env["target_attr"]
-        sensitive_attr = dataset_env["sensitive_attr"]
-        for ml_algo in params["ml_algos"]:
-            ml_model = f"experimental_results/ML_models/model_{dataset}_{sensitive_attr}_{ml_algo}.pkl"
-            for cost_type in params["costs"]:
-                for lambda_decision in params["lambda_decision"]:
-                    for time_horizon in params["time_horizon"]:
-                        for dp_threshold in params["dp_thresholds"]:
-                            for idx_simul in range(params["n_simulations"]):
+    for idx_simul in range(params["n_simulations"]):
+        for dataset_env in params["dataset_env"]:
+            dataset = dataset_env["dataset"]
+            target_attr = dataset_env["target_attr"]
+            sensitive_attr = dataset_env["sensitive_attr"]
+            for ml_algo in params["ml_algos"]:
+                ml_model = f"experimental_results/ML_models/model_{dataset}_{sensitive_attr}_{ml_algo}.pkl"
+                for cost_type in params["costs"]:
+                    for lambda_decision in params["lambda_decision"]:
+                        for time_horizon in params["time_horizon"]:
+                            for dp_threshold in params["dp_thresholds"]:
+                            
                                 task = (ml_model, ml_algo, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, idx_simul)
                                 tasks.append(task)
 

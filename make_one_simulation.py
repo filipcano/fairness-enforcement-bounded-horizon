@@ -114,7 +114,7 @@ def make_one_simulation(net, ml_algo, data_loader, shield_df, dp_threshold, time
 
     for step, (x, y, s) in enumerate(data_loader):
         
-        if step > time_horizon:
+        if step >= time_horizon:
             break
         if ml_algo == "laftr":
             h, decoded, output, adv_pred = net(x.to(device), s.to(device))
