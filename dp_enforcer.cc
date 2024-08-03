@@ -228,7 +228,7 @@ void DPEnforcerMinCost::save_val_to_file(string filename) {
                             int gAacc = i3;
                             int gBacc = i4;
                             int gBseen = T - i1 - gAseen;
-                            float dp = abs((float)gAacc/(1.0+gAseen) - (float)gBacc/(1.0+gBseen));
+                            float dp = compute_dp(gAseen, gAacc, gBseen, gBacc);
                             if (dp <= eps) print = true;
                             else print = false;
                         }
@@ -305,7 +305,10 @@ float DPEnforcerMinCost::compute_dp(int gAseen, int gAacc, int gBseen, int gBacc
     int q = gBseen + buff_gBseen;
 
     if (b + q == 0) return 0;
-    return abs((float)a/(1.0 + b) - (float)p/(1.0 + q));
+    // if (b == 0) { a = 0; b=1; }
+    // if (q == 0) { p = 0; q = 1;}
+    // return abs((float)a/float(b) - (float)p/float(q));
+    return abs((float)a/float(b+1.0) - (float)p/float(q+1.0));
 }
 
 float DPEnforcerMinCost::Val(int t, int gAseen, int gAacc, int gBacc) {
@@ -320,13 +323,27 @@ float DPEnforcerMinCost::Val(int t, int gAseen, int gAacc, int gBacc) {
     if (t == 0) {
         float bias = compute_dp(gAseen, gAacc, gBseen, gBacc);
         // bool accRateA = (alpha*gAseen <= gAacc) and (gAacc <= beta*gAseen);
-        bool accRateA = (custom_multiply(alpha,gAseen) <= gAacc) and (gAacc <= custom_multiply(beta,gAseen));
-        bool accRateB = (custom_multiply(alpha,gBseen) <= gBacc) and (gBacc <= custom_multiply(beta,gBseen));
 
-        if ((bias < eps) and accRateA and accRateB) {
-            return res = 0;
-        } 
-        return res = INF;
+        
+        
+        // int min_seen = 0;
+        // if (alpha > 0) min_seen = 1+int(ceil((1.0-alpha)/alpha));
+        // if (beta < 1) min_seen = max(min_seen, 1+int(ceil(beta/(1.0 - beta))));
+
+        // if ((alpha > 0) or (beta < 1)) min_seen = int(ceil(1/(beta-alpha))) -1;
+
+        int min_seen = int(ceil(1/(beta-alpha)));
+        if ((alpha == 0) and (beta == 1)) min_seen = 0;
+
+        if ((gAseen >= min_seen) and (gBseen >= min_seen)) {
+            bool accRateA = (custom_multiply(alpha,gAseen) <= gAacc) and (gAacc <= custom_multiply(beta,gAseen));
+            bool accRateB = (custom_multiply(alpha,gBseen) <= gBacc) and (gBacc <= custom_multiply(beta,gBseen));    
+            if ((bias <= eps) and accRateA and accRateB) {
+                return res = 0;
+            } 
+            return res = INF;
+        }
+        return res = 0;
     }
 
     res = 0;

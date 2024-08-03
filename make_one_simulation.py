@@ -261,13 +261,13 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_thresh
 
         X[numurical_cols] = X[numurical_cols].pipe(scale_df, scaler)
     
-    data = PandasDataSet(X, y, s)
-    loader = InfiniteDataLoader(data, batch_size=1, shuffle=True, drop_last=True)
+    data_loader = PandasDataSet(X, y, s)
+    # loader = InfiniteDataLoader(data, batch_size=1, shuffle=True, drop_last=True)
 
     shield_df = load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, debug=debug)
 
 
-    res_df = make_one_simulation(net, ml_algo, data, shield_df, dp_threshold, time_horizon, lambda_decision=lambda_decision)
+    res_df = make_one_simulation(net, ml_algo, data_loader, shield_df, dp_threshold, time_horizon, lambda_decision=lambda_decision)
 
     res_df['dp'] = np.abs(res_df['gAacc']/(1+res_df['gAseen']) - res_df['gBacc']/(1+res_df['gBseen']))
     pd.set_option('display.max_rows', None)

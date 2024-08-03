@@ -5,7 +5,7 @@ import pandas as pd
 from ffb.utils import PandasDataSet, seed_everything
 from torch.utils.data import DataLoader
 from sklearn.preprocessing import StandardScaler
-import subprocess
+import subprocess, psutil, time
 
 import sys
 import os
@@ -23,7 +23,23 @@ def parse_args():
     parser.add_argument("--dp_epsilon", type=float, default=0.15, help="Bound on demographic parity")
     parser.add_argument("--cost", type=str, default="paired", choices=["constant", "paired"], 
                         help="Cost for each decision. Can be constant or paired with using the provided ML model")
+    parser.add_argument("--min_acc_rate", type=float, default=0, help="Minimum acceptance rate (for composable shields)")
+    parser.add_argument("--max_acc_rate", type=float, default=1, help="Minimum acceptance rate (for composable shields)")
+    parser.add_argument("--buff_gAacc", type=int, default=0, help="Buffer in gAacc (for composable shields)")
+    parser.add_argument("--buff_gAseen", type=int, default=0, help="Buffer in gAseen (for composable shields)")
+    parser.add_argument("--buff_gBacc", type=int, default=0, help="Buffer in gBacc (for composable shields)")
+    parser.add_argument("--buff_gBseen", type=int, default=0, help="Buffer in gBseen (for composable shields)")
+
     return parser.parse_args()
+
+def check_memory(threshold=0.2):
+    """
+    Check if available memory is below the threshold.
+    :param threshold: float, minimum fraction of free memory required
+    :return: bool, True if memory is above the threshold, else False
+    """
+    mem = psutil.virtual_memory()
+    return mem.available / mem.total > threshold
 
 def assert_input_integrity(dataset, sensitive_attr, ml_model):
     if dataset not in ml_model:
@@ -46,15 +62,19 @@ def assert_input_integrity(dataset, sensitive_attr, ml_model):
     raise ValueError(f"Unknown dataset: {dataset}")
 
 
-def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost_type, debug=1):
+def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost_type, 
+         min_acc_rate=0, max_acc_rate=1, 
+         buff_gAacc=0, buff_gAseen=0, buff_gBacc=0, buff_gBseen=0, debug=1):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    is_shield_composable = (min_acc_rate != 0) or (max_acc_rate != 1)
+    is_shield_composable = is_shield_composable or (buff_gAacc != 0) or (buff_gAseen != 0)
+    is_shield_composable = is_shield_composable or (buff_gBacc != 0) or (buff_gBseen != 0)
 
     sensitive_attr = assert_input_integrity(dataset, sensitive_attr, ml_model)
 
     net = torch.load(ml_model)
 
-    
     
     if dataset == "adult":
         if debug > 0:
@@ -169,12 +189,12 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
     # print(relative_frequenciesG0)
     # print(relative_frequenciesG1)
 
-    min_acc_rate = 0
-    max_acc_rate = 1
-    buff_gAacc = 0
-    buff_gAseen = 0
-    buff_gBacc = 0
-    buff_gBseen = 0
+    # min_acc_rate = 0
+    # max_acc_rate = 1
+    # buff_gAacc = 0
+    # buff_gAseen = 0
+    # buff_gBacc = 0
+    # buff_gBseen = 0
 
     dp_epsilon_str = f"{dp_epsilon:.4f}".split('.')[1]
     output_str = f"{time_horizon} {n_cost_bins} {dp_epsilon} {min_acc_rate} {max_acc_rate}\n"
@@ -221,9 +241,18 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
         output_str += "\n"
         for i in range(n_cost_bins):
             output_str += f"{prob_acc_1*probs_acc_1[i]*probGroup1:.5f} "
+
+    # is_shield_composable = 
     clean_ml_model = ml_model.split('/')[-1].split('.')[0]
-    tmp_input_path = f"cpp_inputs/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}_{cost_type}.txt"
-    tmp_saved_policy_path = f"experimental_results/dp_enforcer_policies/{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}_{cost_type}.txt"
+    base_filename = f"{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}_{cost_type}"
+
+    if is_shield_composable:
+        min_acc_rate_str = f"{min_acc_rate:.4f}".split('.')[1]
+        max_acc_rate_str = f"{max_acc_rate:.4f}".split('.')[1]
+        base_filename = f"{base_filename}_composable_{min_acc_rate_str}_{max_acc_rate_str}_{buff_gAacc}_{buff_gAseen}_{buff_gBacc}_{buff_gBseen}"
+
+    tmp_input_path = f"cpp_inputs/{base_filename}.txt"
+    tmp_saved_policy_path = f"experimental_results/dp_enforcer_policies/{base_filename}.txt"
     with open(tmp_input_path, "w") as fp:
         fp.write(output_str)
 
@@ -232,7 +261,13 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
     # print("CPP input end")
 
 
-    # Command and arguments
+    # # Command and arguments
+    # time.sleep(5*np.random.random())
+
+    # while not check_memory():
+    #     print("Low memory, waiting...")
+    #     time.sleep(5)  # Wait for 5 seconds before checking memory again
+        
     command = ['./dp_enforcer.o', '--save_policy', f'--saved_policy_file={tmp_saved_policy_path}']
 
     # Open the input file
@@ -245,10 +280,17 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
             text=True                  # To get outputs as strings (not bytes)
         )
 
+    is_shield_composable_buffered = (buff_gAacc != 0) or (buff_gAseen != 0) or (buff_gBacc != 0) or (buff_gBseen != 0)
+    # if is_shield_composable_buffered:
+        # os.remove(tmp_input_path)
+
     # Print the outputs and errors, if any
     if debug > 0:
         print("Output:", result.stdout)
-    
+
+    aux_output_path = f"experimental_results/dp_enforcer_policies/{base_filename}_output.txt"
+    with open(aux_output_path, 'w') as fp:
+        fp.write(result.stdout)
 
 
 
