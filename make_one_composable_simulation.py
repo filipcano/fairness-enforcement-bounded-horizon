@@ -29,6 +29,21 @@ def compute_dp(gAseen, gAacc, gBseen, gBacc):
         gBacc = 0
     return np.abs(gAacc/gAseen - gBacc/gBseen)
 
+def is_dp_smaller_or_equal_than_kappa(gAseen, gAacc, gBseen, gBacc, kappa):
+    if gAseen == 0:
+        gAseen = 1
+        gAacc = 0
+    if gBseen == 0:
+        gBseen = 1
+        gBacc = 0
+    # LHS = np.abs(gAacc*(gBseen+1.0) - gBacc*(gAseen+1.0))
+    # RHS = (gAseen+1.0)*(gBseen+1.0)*kappa
+
+    LHS = np.abs(gAacc*(gBseen) - gBacc*(gAseen))
+    RHS = (gAseen)*(gBseen)*kappa
+    return LHS <= RHS
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_runs", type=int, default=10, help="Number of runs")
@@ -107,7 +122,7 @@ def load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins,
 
 
     if time_waited >= max_time_asleep:
-        raise Exception("Waited for more than 1 hour for shield to be computed!")
+        raise Exception(f"Waited for more than 1 hour for shield to be computed on {shield_filepath}!")
     
     shield_df = pd.read_csv(shield_filepath, delim_whitespace=True, header=None, 
                  names=['rem_dec', 'gAseen', 'gAacc', 'gBacc', 'val'])
@@ -119,10 +134,7 @@ def load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins,
     shield_df.set_index(['gAseen', 'gAacc', 'gBseen', 'gBacc'], inplace=True)
     return shield_df
 
-def is_dp_smaller_or_equal_than_kappa(gAseen, gAacc, gBseen, gBacc, kappa):
-    LHS = np.abs(gAacc*(gBseen+1.0) - gBacc*(gAseen+1.0))
-    RHS = (gAseen+1.0)*(gBseen+1.0)*kappa
-    return LHS <= RHS
+
 
 def get_shield_value(df, gAseen, gAacc, gBseen, gBacc, dp_threshold, 
                      buff_gAseen=0, buff_gAacc=0, buff_gBseen=0, buff_gBacc=0):
@@ -252,7 +264,7 @@ def make_long_window_simulation(net, ml_model, ml_algo, dataset, data_loader, se
 
 
         
-
+    failure_log = [1 if False else 0 for _ in log_gAacc] # long_window has no failure condition
     res_dict = {
         "gAseen" : log_gAseen,
         "gAacc" : log_gAacc,
@@ -261,8 +273,113 @@ def make_long_window_simulation(net, ml_model, ml_algo, dataset, data_loader, se
         "cost" : cost_decision,
         "utility" : utility,
         "exp_cost_int" : expected_cost_with_intervention,
-        "exp_cost_no_int" : expected_cost_without_intervention
+        "exp_cost_no_int" : expected_cost_without_intervention,
+        "failure" : failure_log
     }
+
+    res_df = pd.DataFrame(res_dict)
+
+    return res_df
+
+
+def make_no_shield_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
+                          n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, debug=0):
+
+    """
+    See make_one_simulation() for documentation on the input-output of this function
+    """
+
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # print(f"{dp_threshold=}")
+
+    log_gAseen = []
+    log_gAacc = []
+    log_gBseen = []
+    log_gBacc = []
+    cost_decision = [] # cost of each decision. Add to get cost of the run
+    utility = [] # utility of each decision. Add to get utility of run
+    expected_cost_with_intervention = []
+    expected_cost_without_intervention = []
+
+
+    # cummulative versions
+    cum_gAseen = 0
+    cum_gAacc = 0
+    cum_gBseen = 0
+    cum_gBacc = 0
+
+    
+
+    for window_it in range(n_windows):
+        gAseen = 0
+        gAacc = 0
+        gBseen = 0
+        gBacc = 0
+
+        for step, (x, y, s) in enumerate(data_loader):
+            
+            if step >= time_horizon:
+                break
+
+            if ml_algo == "laftr":
+                h, decoded, output, adv_pred = net(x.to(device), s.to(device))
+            else:
+                h, output = net(x.to(device))
+
+            score = output.detach().cpu().numpy()[0]
+            net_proposes_accept = score > 0.5
+            cost_of_intervention = np.abs(score - 0.5)
+
+            cost_keep = None
+            cost_change = None
+
+            if (s == 0): # Group A, I think
+                gAseen += 1
+                cum_gAseen += 1
+            else: # Group B, I think
+                gBseen += 1
+                cum_gBseen += 1
+
+            is_decision_accept = net_proposes_accept
+
+            if is_decision_accept:
+                if s == 0:
+                    gAacc += 1
+                    cum_gAacc += 1
+                else:
+                    gBacc += 1
+                    cum_gBacc += 1
+                        
+            final_label = 1 if is_decision_accept else 0
+            ml_proposed_label = 1 if net_proposes_accept else 0
+
+            utility.append(1 - np.abs(final_label - y.detach().numpy()[0]))
+            if final_label == ml_proposed_label:
+                cost_decision.append(0)
+            else:
+                cost_decision.append(cost_of_intervention)
+
+            log_gAseen.append(cum_gAseen)
+            log_gAacc.append(cum_gAacc)
+            log_gBseen.append(cum_gBseen)
+            log_gBacc.append(cum_gBacc)
+            expected_cost_with_intervention.append(cost_change)
+            expected_cost_without_intervention.append(cost_keep)
+    
+    failure_log = [1 if False else 0 for _ in log_gAacc] # naive has no failure condition
+    res_dict = {
+        "gAseen" : log_gAseen,
+        "gAacc" : log_gAacc,
+        "gBseen" : log_gBseen,
+        "gBacc" : log_gBacc,
+        "cost" : cost_decision,
+        "utility" : utility,
+        "exp_cost_int" : expected_cost_with_intervention,
+        "exp_cost_no_int" : expected_cost_without_intervention,
+        "failure" : failure_log
+    }
+
     res_df = pd.DataFrame(res_dict)
 
     return res_df
@@ -373,6 +490,7 @@ def make_naive_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitiv
             expected_cost_with_intervention.append(cost_change)
             expected_cost_without_intervention.append(cost_keep)
     
+    failure_log = [1 if False else 0 for _ in log_gAacc] # naive has no failure condition
     res_dict = {
         "gAseen" : log_gAseen,
         "gAacc" : log_gAacc,
@@ -381,7 +499,8 @@ def make_naive_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitiv
         "cost" : cost_decision,
         "utility" : utility,
         "exp_cost_int" : expected_cost_with_intervention,
-        "exp_cost_no_int" : expected_cost_without_intervention
+        "exp_cost_no_int" : expected_cost_without_intervention,
+        "failure" : failure_log
     }
 
     res_df = pd.DataFrame(res_dict)
@@ -499,6 +618,7 @@ def make_bounded_acc_rates_simulation(net, ml_model, ml_algo, dataset, data_load
             failure = True
             break
     
+    failure_log = [1 if failure else 0 for _ in log_gAacc]
     res_dict = {
         "gAseen" : log_gAseen,
         "gAacc" : log_gAacc,
@@ -507,11 +627,13 @@ def make_bounded_acc_rates_simulation(net, ml_model, ml_algo, dataset, data_load
         "cost" : cost_decision,
         "utility" : utility,
         "exp_cost_int" : expected_cost_with_intervention,
-        "exp_cost_no_int" : expected_cost_without_intervention
+        "exp_cost_no_int" : expected_cost_without_intervention,
+        "failure" : failure_log
     }
+
     res_df = pd.DataFrame(res_dict)
 
-    return res_df, failure
+    return res_df
 
 
 def make_buffered_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
@@ -626,7 +748,8 @@ def make_buffered_simulation(net, ml_model, ml_algo, dataset, data_loader, sensi
             log_gBacc.append(cum_gBacc)
             expected_cost_with_intervention.append(cost_change)
             expected_cost_without_intervention.append(cost_keep)
-    
+
+    failure_log = [1 if failure else 0 for _ in log_gAacc]
     res_dict = {
         "gAseen" : log_gAseen,
         "gAacc" : log_gAacc,
@@ -635,11 +758,12 @@ def make_buffered_simulation(net, ml_model, ml_algo, dataset, data_loader, sensi
         "cost" : cost_decision,
         "utility" : utility,
         "exp_cost_int" : expected_cost_with_intervention,
-        "exp_cost_no_int" : expected_cost_without_intervention
+        "exp_cost_no_int" : expected_cost_without_intervention,
+        "failure" : failure_log
     }
     res_df = pd.DataFrame(res_dict)
 
-    return res_df, failure
+    return res_df
 
 
 def make_one_simulation(composability_type, net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
@@ -647,7 +771,7 @@ def make_one_simulation(composability_type, net, ml_model, ml_algo, dataset, dat
                           min_acc_rate=None, max_acc_rate=None, debug=0):
     
     """
-    composability_type: Type of composability, can be ["naive", "buffered", "long_window", "bounded_acc_rates"]
+    composability_type: Type of composability, can be ["naive", "buffered", "long_window", "bounded_acc_rates", "none"], where "none" means no shielding (lambda = 0)
     net: ML classifier
     ml_model: path to the ml_model being used, corresponds with net
     ml_algo: name of the ML algo (erm, hsic, laftr, etc)
@@ -677,24 +801,13 @@ def make_one_simulation(composability_type, net, ml_model, ml_algo, dataset, dat
     if composability_type == "naive":
         return make_naive_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
                           n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, debug=debug)
+    elif composability_type == "none":
+        return make_no_shield_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
+                          n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, debug=debug)
     
     elif composability_type == "buffered":
-        failure = True
-        n_tries = 0
-        while failure and n_tries < max_tries:
-            res_df, failure = make_buffered_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
+        res_df = make_buffered_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
                           n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, debug=debug)
-            if failure:
-                n_tries += 1
-
-        if n_tries > 0:
-            log_str += f", {n_tries=}\n"
-            with open("experimental_results/simulation_results/AAnon-enforcement-log.txt", "a") as fp:
-                fp.write(log_str)
-
-        if failure:
-            res_df = res_df.head(1)
-
         return res_df
         
 
@@ -703,21 +816,9 @@ def make_one_simulation(composability_type, net, ml_model, ml_algo, dataset, dat
                           n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, debug=debug)
     elif composability_type == "bounded_acc_rates":
         assert (min_acc_rate != None) and (max_acc_rate != None), "Bounds on acc rates not provided"
-        failure = True
-        n_tries = 0
-        while failure and n_tries < max_tries:
-            res_df, failure = make_bounded_acc_rates_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
+        res_df = make_bounded_acc_rates_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
                           n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, 
                           min_acc_rate, max_acc_rate, debug=0)
-            if failure:
-                n_tries += 1
-
-        if n_tries > 0:
-            log_str += f", {n_tries=}\n"
-            with open("experimental_results/simulation_results/AAnon-enforcement-log.txt", "a") as fp:
-                fp.write(log_str)
-        if failure:
-            res_df = res_df.head(1) # makes sure that this does not pass the next filter
         return res_df
     else:
         raise Exception(f"Composability type {composability_type} not implemented")
@@ -790,9 +891,19 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_thresh
                           n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, 
                           min_acc_rate=min_acc_rate, max_acc_rate=max_acc_rate, debug=debug)
 
-    res_df['dp'] = np.abs(res_df['gAacc']/(1+res_df['gAseen']) - res_df['gBacc']/(1+res_df['gBseen']))
-    pd.set_option('display.max_rows', None)
+    # res_df['dp'] = np.abs(res_df['gAacc']/(1+res_df['gAseen']) - res_df['gBacc']/(1+res_df['gBseen']))
+    res_df['dp'] = res_df.apply(lambda row: compute_dp(row['gAseen'], row['gAacc'], row['gBseen'], row['gBacc']), axis=1)
+
+    # for i in res_df.index:
+    #     gAacc = res_df.loc[i,'gAacc']
+    #     gAseen = res_df.loc[i, 'gAseen']
+    #     gBacc = res_df.loc[i,'gBacc']
+    #     gBseen = res_df.loc[i, 'gBseen']
+    #     res_df.loc[i, 'dp'] = compute_dp(gAseen, gAacc, gBseen,gBacc)
+    
+    
     if debug > 1:
+        pd.set_option('display.max_rows', None)
         print(res_df.tail(1))
         print("cost: ", res_df['cost'].sum())
         print("utility: ", res_df['utility'].sum())

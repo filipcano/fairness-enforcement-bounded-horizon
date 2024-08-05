@@ -87,27 +87,28 @@ def run_simulation(task):
         ml_model, ml_algo, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, composability_type, n_windows, idx_simul = task
         dp_threshold_str = f"{dp_threshold:.4f}".split('.')[1]
         min_acc_rate, max_acc_rate, prob = get_bounds_on_acceptance_rates(dataset, dp_threshold, time_horizon)
-        if prob < 0.4 and composability_type == "bounded_acc_rates":
-            logging.error(f"In simulation {task}, the probability of gettig and enforceable trace was too small {prob=}")
-            return 0
+        # if prob < 0.4 and composability_type == "bounded_acc_rates":
+        #     logging.error(f"In simulation {task}, the probability of gettig and enforceable trace was too small {prob=}")
+        #     return 0
         
         res_df = make_one_composable_simulation.main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, n_windows, composability_type, min_acc_rate=min_acc_rate, max_acc_rate=max_acc_rate, debug=0)
-        if len(res_df) == time_horizon*n_windows:
-            res_df['sim_num'] = idx_simul
-            res_df['step'] = res_df.index
-            res_df['acc_util'] = res_df['utility'].cumsum()
-            res_df['acc_cost'] = res_df['cost'].cumsum()
-            res_df['intervention'] = (res_df['cost'] != 0).astype(int)
-            res_df['n_interventions'] = res_df['intervention'].cumsum()
-            path_to_save = f"experimental_results/simulation_results/{dataset}_{sensitive_attr}_{ml_algo}_{time_horizon}_{cost_type}_{n_cost_bins}_{dp_threshold_str}_{lambda_decision}_composable_{composability_type}_{n_windows}.csv"
-            if os.path.isfile(path_to_save):
-                res_df.to_csv(path_to_save, mode='a', header=False, index=True)
-            else:
-                res_df.to_csv(path_to_save)
-
-            return 1
+        # if len(res_df) == time_horizon*n_windows:
+        res_df['sim_num'] = idx_simul
+        res_df['step'] = res_df.index
+        res_df['acc_util'] = res_df['utility'].cumsum()
+        res_df['acc_cost'] = res_df['cost'].cumsum()
+        res_df['intervention'] = (res_df['cost'] != 0).astype(int)
+        res_df['n_interventions'] = res_df['intervention'].cumsum()
+        path_to_save = f"experimental_results/simulation_results/{dataset}_{sensitive_attr}_{ml_algo}_{time_horizon}_{cost_type}_{n_cost_bins}_{dp_threshold_str}_{lambda_decision}_composable_{composability_type}_{n_windows}.csv"
+        if os.path.isfile(path_to_save):
+            res_df.to_csv(path_to_save, mode='a', header=False, index=True)
         else:
-            logging.error(f"In task {task}, the resulting dataframe was incomplete, with {len(res_df)} rows")
+            res_df.to_csv(path_to_save)
+        return 1
+
+        #     return 1
+        # else:
+        #     logging.error(f"In task {task}, the resulting dataframe was incomplete, with {len(res_df)} rows")
 
     except Exception as e:
         logging.error(f"Error in simulation {task}: {e}")
@@ -128,15 +129,25 @@ def main_parallel(params): # parallel version
             sensitive_attr = dataset_env["sensitive_attr"]
             for ml_algo in params["ml_algos"]:
                 ml_model = f"experimental_results/ML_models/model_{dataset}_{sensitive_attr}_{ml_algo}.pkl"
-                for cost_type in params["costs"]:
-                    for lambda_decision in params["lambda_decision"]:
-                        for time_horizon in params["time_horizon"]:
-                            for dp_threshold in params["dp_thresholds"]:
-                                for composability_type in params["composability_types"]:
-                                    task = (ml_model, ml_algo, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, composability_type, n_windows, idx_simul)
-                                    tasks.append(task)
+                for time_horizon in params["time_horizon"]:
+                    for composability_type in params["composability_types"]:
+                        if composability_type == "none":
+                            # these three parameters are just placeholders, they result does not depend on them for composability_type == "none"
+                            cost_type = "constant"
+                            dp_threshold = 0.1
+                            lambda_decision = 0 
+                            task = (ml_model, ml_algo, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, composability_type, n_windows, idx_simul)
+                            tasks.append(task)
+                        else:
+                            for cost_type in params["costs"]:
+                                for lambda_decision in params["lambda_decision"]:
+                                    
+                                    for dp_threshold in params["dp_thresholds"]:
+                                    
+                                        task = (ml_model, ml_algo, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, composability_type, n_windows, idx_simul)
+                                        tasks.append(task)
 
-
+    total_iterations = len(tasks)
     n_processes = 16
     if not "long_window" in params["composability_types"]:
         n_processes = multiprocessing.cpu_count()-1

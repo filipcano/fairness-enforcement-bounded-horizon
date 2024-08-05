@@ -229,7 +229,7 @@ void DPEnforcerMinCost::save_val_to_file(string filename) {
                             int gBacc = i4;
                             int gBseen = T - i1 - gAseen;
                             float dp = compute_dp(gAseen, gAacc, gBseen, gBacc);
-                            if (dp <= eps) print = true;
+                            if (dp <= eps*1.01) print = true; // extra 1.1 is to guard for numerical errors
                             else print = false;
                         }
                         else if (val == defaultVal) print = false;
@@ -304,11 +304,13 @@ float DPEnforcerMinCost::compute_dp(int gAseen, int gAacc, int gBseen, int gBacc
     int p = gBacc + buff_gBacc;
     int q = gBseen + buff_gBseen;
 
-    if (b + q == 0) return 0;
-    // if (b == 0) { a = 0; b=1; }
-    // if (q == 0) { p = 0; q = 1;}
-    // return abs((float)a/float(b) - (float)p/float(q));
-    return abs((float)a/float(b+1.0) - (float)p/float(q+1.0));
+    // this tweak protects from edge cases
+    if (b == 0) { a = 0; b=1; }
+    if (q == 0) { p = 0; q = 1;}
+
+    return abs((float)a/(float)b - (float)p/(float)q);
+    // if (b + q == 0) return 0;
+    // return abs((float)a/float(b+1.0) - (float)p/float(q+1.0));
 }
 
 float DPEnforcerMinCost::Val(int t, int gAseen, int gAacc, int gBacc) {
