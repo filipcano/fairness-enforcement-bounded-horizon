@@ -93,7 +93,7 @@ VI convertToBaseB(int N, int B) {
 
 
 class EOEnforcerMinCost {
-    V6D VAL;
+    
     // VAL[remaining_decisions][Group A seen][Group A accepted][Group B seen][Group B acc][prev_step]
     // remaining_decisions: 0 ... T
     // Group A seen: 0 ... T-remaining_decisions
@@ -108,6 +108,7 @@ class EOEnforcerMinCost {
     
     
 public:
+    V6D VAL;
     EOEnforcerMinCost(bool dynamic_distribution);
     int T; // horizon length
     int X; // total number of costs
@@ -376,8 +377,9 @@ float EOEnforcerMinCost::Val(int t, int gAseen, int gAacc, int gBseen, int gBacc
     
     if (t == 0) {        
         float bias = compute_eo(gAseen, gAacc, gBseen, gBacc);
-        int min_seen = int(ceil(1/eps));
-        // if ((alpha == 0) and (beta == 1)) min_seen = 0;
+        int min_seen = 2*int(ceil(1/eps));
+        // cout << min_seen << endl;
+        if ((alpha == 0) and (beta == 1)) min_seen = 0;
 
         if ((gAseen >= min_seen) and (gBseen >= min_seen)) {
             bool accRateA = (custom_multiply(alpha,gAseen) <= gAacc) and (gAacc <= custom_multiply(beta,gAseen));
@@ -462,6 +464,23 @@ int main(int argc, char **argv) {
     cout << "Optimized Elapsed time: " << elapsed_time_ms/1000 << " seconds" << endl;
     PrintMemoryInfo("Optimized");
     if (save_policy) FA.save_val_to_file(filename);
+
+
+    // int i1 = 0;
+    // for (int i2=0; i2 < FA.VAL[i1].size(); ++i2) {
+    //     for (int i3=0; i3< FA.VAL[i1][i2].size(); ++i3) {
+    //         for (int i4=0; i4< FA.VAL[i1][i2][i3].size(); ++i4) {
+    //             for (int i5=0; i5 < FA.VAL[i1][i2][i3][i4].size(); ++i5) {
+    //                 for (int i6=0; i6 < FA.VAL[i1][i2][i3][i4][i5].size(); ++i6) {
+    //                     float theval = FA.VAL[i1][i2][i3][i4][i5][i6];
+    //                     if ((theval != INF) and (theval != -1)) {
+    //                         cout << i1 << " " << i2 << " " << i3 << " " << i4 << " " << i5 << " " << i6 << " " << theval << endl;
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
     
 
 }
