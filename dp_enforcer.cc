@@ -8,6 +8,10 @@
 #include<algorithm>
 #include<cassert>
 #include<random>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+#include <stdexcept>
 // #include "boost/multi_array.hpp"
 using namespace std;
 
@@ -88,23 +92,15 @@ VI convertToBaseB(int N, int B) {
 
 
 
-class DPEnforcerMinCost {
+class EOEnforcerMinCost {
     V4D VAL;
-    // VAL[remaining_decisions][Group A accepted][Group B accepted][Group A seen]
-    // VAL[remaining_decisions][Group A seen][Group A accepted][Group A acc]
+    // VAL[remaining_decisions][Group A seen][Group A accepted][Group B acc]
     // remaining_decisions: 0 ... T
     // Group A seen: 0 ... T-remaining_decisions
     // Group A accepted: 0 ... gAseen //
     // Group B accepted : 0 ... T-remaining_decisions-gAseen
     // Group B observed is taken from Group A seen, T and remaining decisions, as gBseen = T-remaining_decisions-gAseen
 
-    // Deprecated: 
-    // VAL[remaining_decisions][Group A accepted][Group B accepted][Group A seen]
-    // remaining_decisions: 0 ... T
-    // Group A accepted: 0 ... T
-    // Group B accepted: 0 ... T // this could be optimizied, T is too bias, would not pass the constraint
-    // Group A observed: 0 ... T
-    // Group B observed is taken from Group A, T and remaining decisions
 
 
 
@@ -112,7 +108,7 @@ class DPEnforcerMinCost {
     
     
 public:
-    DPEnforcerMinCost(bool dynamic_distribution);
+    EOEnforcerMinCost(bool dynamic_distribution);
     int T; // horizon length
     int X; // total number of costs
     VD N; // sequence of costs, of size X
@@ -125,14 +121,14 @@ public:
 
     
     float Val(int t, int gAseen, int gAacc, int gBacc);
-    float compute_dp(int gAseen, int gAacc, int gBseen, int gBacc);
+    float compute_eo(int gAseen, int gAacc, int gBseen, int gBacc);
     void printInputs();
     V2D make_one_simulation();
     void save_val_to_file(string filename);
     void load_val_from_file(string filename);
 };
 
-DPEnforcerMinCost::DPEnforcerMinCost(bool dynamic_distribution) {
+EOEnforcerMinCost::EOEnforcerMinCost(bool dynamic_distribution) {
     cin >> T >> X >> eps >> alpha >> beta;
     cin >> buff_gAacc >> buff_gAseen >> buff_gBacc >> buff_gBseen;
 
@@ -187,7 +183,7 @@ DPEnforcerMinCost::DPEnforcerMinCost(bool dynamic_distribution) {
 }
 
 
-void DPEnforcerMinCost::printInputs() {
+void EOEnforcerMinCost::printInputs() {
     cout << "Start print inputs" << endl;
     cout << "T: " << T << ", X: " << X << ", eps: " << eps << endl << "N: [";
     for (int i = 0; i < N.size(); ++i) cout << N[i] << ", ";
@@ -208,47 +204,79 @@ void DPEnforcerMinCost::printInputs() {
 }
 
 
-void DPEnforcerMinCost::save_val_to_file(string filename) {
-    // Serialize
+void EOEnforcerMinCost::save_val_to_file(string filename) {
+
+    int fd = open(filename.c_str(), O_WRONLY | O_CREAT, 0644);
+    if (fd == -1) {
+        throw std::runtime_error("Failed to open file");
+    }
+
+    // Acquire an exclusive lock on the file
+    if (flock(fd, LOCK_EX) == -1) {
+        close(fd);
+        throw std::runtime_error("Failed to lock file");
+    }
+
+    // Create an ofstream object from the file descriptor
+    std::ofstream file;
+    file.open(filename);
+    if (!file.is_open()) {
+        flock(fd, LOCK_UN); // Unlock the file
+        close(fd);
+        throw std::runtime_error("Failed to open ofstream");
+    }
+
+    // Write data to the file
     cout << "Saving policy in " << filename << " ..." << endl;
 
-    std::ofstream file(filename);
-    if (file.is_open()) {
-        for (int i1 =0; i1 < VAL.size(); ++i1) {
-            for (int i2=0; i2 < VAL[i1].size(); ++i2) {
-                for (int i3=0; i3< VAL[i1][i2].size(); ++i3) {
-                    for (int i4=0; i4< VAL[i1][i2][i3].size(); ++i4) {
-                        float val = VAL[i1][i2][i3][i4];
-                        bool print = true;
-                        if (val == 0.0) {
-                            print = false;
-                        }
-                        else if (val == INF) {
-                            int gAseen = i2;
-                            int gAacc = i3;
-                            int gBacc = i4;
-                            int gBseen = T - i1 - gAseen;
-                            float dp = compute_dp(gAseen, gAacc, gBseen, gBacc);
-                            if (dp <= eps*1.01) print = true; // extra 1.1 is to guard for numerical errors
-                            else print = false;
-                        }
-                        else if (val == defaultVal) print = false;
-                        
-                        if (print) {
-                            file << i1 << " " << i2 << " " << i3 << " " << i4;
-                            file << " " << VAL[i1][i2][i3][i4] << "\n";
-                        }
+
+    for (int i1 =0; i1 < VAL.size(); ++i1) {
+        for (int i2=0; i2 < VAL[i1].size(); ++i2) {
+            for (int i3=0; i3< VAL[i1][i2].size(); ++i3) {
+                for (int i4=0; i4< VAL[i1][i2][i3].size(); ++i4) {
+                    float val = VAL[i1][i2][i3][i4];
+                    bool print = true;
+                    if (val == 0.0) {
+                        print = false;
+                    }
+                    else if (val == INF) {
+                        int gAseen = i2;
+                        int gAacc = i3;
+                        int gBacc = i4;
+                        int gBseen = T - i1 - gAseen;
+                        float dp = compute_eo(gAseen, gAacc, gBseen, gBacc);
+                        if (dp <= eps*1.01) print = true; // extra 1.1 is to guard for numerical errors
+                        else print = false;
+                    }
+                    else if (val == defaultVal) print = false;
+                    // in whatever the case, at least print the value at the top of the tree
+                    if ((i1 == T) and (i2 == 0) and (i3 == 0) and (i4 == 0)) print = true;
+                    if (print) {
+                        file << i1 << " " << i2 << " " << i3 << " " << i4;
+                        file << " " << VAL[i1][i2][i3][i4] << "\n";
                     }
                 }
             }
         }
-        file.close();
-    } else {
-        std::cerr << "Unable to open file for writing." << std::endl;
     }
+
+
+
+    // Close the ofstream, which flushes and closes the file
+    file.close();
+
+    // Release the lock
+    if (flock(fd, LOCK_UN) == -1) {
+        close(fd);
+        throw std::runtime_error("Failed to unlock file");
+    }
+
+    // Close the file descriptor
+    close(fd);
+
 }
 
-void DPEnforcerMinCost::load_val_from_file(string filename) {
+void EOEnforcerMinCost::load_val_from_file(string filename) {
     cout << "Loading policy..." << endl;
     std::ifstream file(filename);
     int i1, i2, i3, i4;
@@ -265,7 +293,7 @@ void DPEnforcerMinCost::load_val_from_file(string filename) {
 
 
 
-VD DPEnforcerMinCost::get_threshold(int t, int gAacc, int gBacc, int gAseen) {
+VD EOEnforcerMinCost::get_threshold(int t, int gAacc, int gBacc, int gAseen) {
     VD threshold(2,0);
     float acceptA = Val(t-1, gAseen+1, gAacc +1, gBacc);
     float rejectA = Val(t-1, gAseen+1, gAacc, gBacc);
@@ -298,13 +326,16 @@ VD DPEnforcerMinCost::get_threshold(int t, int gAacc, int gBacc, int gAseen) {
     return threshold;
 }
 
-float DPEnforcerMinCost::compute_dp(int gAseen, int gAacc, int gBseen, int gBacc) {
+float EOEnforcerMinCost::compute_eo(int gAseen, int gAacc, int gBseen, int gBacc) {
     int a = gAacc + buff_gAacc;
     int b = gAseen + buff_gAseen;
     int p = gBacc + buff_gBacc;
     int q = gBseen + buff_gBseen;
 
     // this tweak protects from edge cases
+
+    // if ((b == 0) or (q == 0)) return 0;
+
     if (b == 0) { a = 0; b=1; }
     if (q == 0) { p = 0; q = 1;}
 
@@ -313,7 +344,7 @@ float DPEnforcerMinCost::compute_dp(int gAseen, int gAacc, int gBseen, int gBacc
     // return abs((float)a/float(b+1.0) - (float)p/float(q+1.0));
 }
 
-float DPEnforcerMinCost::Val(int t, int gAseen, int gAacc, int gBacc) {
+float EOEnforcerMinCost::Val(int t, int gAseen, int gAacc, int gBacc) {
     // cout << "hola1" << endl;
     // cout << "t: " << t << ", gAacc: " <<  gAacc << ", gBacc: " << gBacc << ", gAseen: " << gAseen << endl;
     float& res = VAL[t][gAseen][gAacc][gBacc];
@@ -323,7 +354,7 @@ float DPEnforcerMinCost::Val(int t, int gAseen, int gAacc, int gBacc) {
     // cout << "t: " << t << ", gAacc: " <<  gAacc << ", gBacc: " << gBacc << ", gAseen: " << gAseen << endl;
     int gBseen = (T-t)-gAseen;
     if (t == 0) {
-        float bias = compute_dp(gAseen, gAacc, gBseen, gBacc);
+        float bias = compute_eo(gAseen, gAacc, gBseen, gBacc);
         // bool accRateA = (alpha*gAseen <= gAacc) and (gAacc <= beta*gAseen);
 
         
@@ -371,6 +402,7 @@ float DPEnforcerMinCost::Val(int t, int gAseen, int gAacc, int gBacc) {
                     accept = N[k] + Val(t-1, gAseen, gAacc, gBacc+1);
                     reject = Val(t-1, gAseen, gAacc, gBacc);
                 }
+                if ((accept == INF) and (reject == INF)) return res = INF;
                 res += custom_multiply(Prob[t][group][decision][k],min(accept, reject));
             }
         }
@@ -397,7 +429,7 @@ int main(int argc, char **argv) {
         if (argument.find(keyword) != std::string::npos) 
             saved_policy_file = argument.substr(keyword.size(),argument.size()-keyword.size());
     }
-    DPEnforcerMinCost FA = DPEnforcerMinCost(dynamic_distribution);
+    EOEnforcerMinCost FA = EOEnforcerMinCost(dynamic_distribution);
     // FA.printInputs();
     cout << "T: " << FA.T << endl;
     string filename = "saved_policies/" + to_string(FA.T) + "_" + to_string(FA.X) + "_agent.txt";

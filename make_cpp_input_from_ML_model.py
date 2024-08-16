@@ -64,7 +64,8 @@ def assert_input_integrity(dataset, sensitive_attr, ml_model):
 
 def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost_type, 
          min_acc_rate=0, max_acc_rate=1, 
-         buff_gAacc=0, buff_gAseen=0, buff_gBacc=0, buff_gBseen=0, debug=1):
+         buff_gAacc=0, buff_gAseen=0, buff_gBacc=0, buff_gBseen=0, debug=1, 
+         fairness_metric = "dp"):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     is_shield_composable = (min_acc_rate != 0) or (max_acc_rate != 1)
@@ -164,6 +165,9 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
     outputsG0 = np.concatenate(outputsG0)
     outputsG1 = np.concatenate(outputsG1)
 
+    if cost_type == "constant":
+        prev_n_bins = n_cost_bins
+        n_cost_bins = 1
     n_bins = 2*n_cost_bins
     counts, _ = np.histogram(outputsG0, bins=n_bins, range=(0, 1))
     relative_frequenciesG0 = counts / sum(counts)
@@ -243,6 +247,8 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
             output_str += f"{prob_acc_1*probs_acc_1[i]*probGroup1:.5f} "
 
     # is_shield_composable = 
+    if cost_type == "constant":
+        n_cost_bins = prev_n_bins
     clean_ml_model = ml_model.split('/')[-1].split('.')[0]
     base_filename = f"{clean_ml_model}_{time_horizon}_{n_cost_bins}_{dp_epsilon_str}_{cost_type}"
 
@@ -253,6 +259,8 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
 
     tmp_input_path = f"cpp_inputs/{base_filename}.txt"
     tmp_saved_policy_path = f"experimental_results/dp_enforcer_policies/{base_filename}.txt"
+    if fairness_metric == "eo":
+        tmp_saved_policy_path = f"experimental_results/dp_enforcer_policies/eo_{base_filename}.txt"
     with open(tmp_input_path, "w") as fp:
         fp.write(output_str)
 
@@ -268,7 +276,7 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
     #     print("Low memory, waiting...")
     #     time.sleep(5)  # Wait for 5 seconds before checking memory again
         
-    command = ['./dp_enforcer.o', '--save_policy', f'--saved_policy_file={tmp_saved_policy_path}']
+    command = [f'./{fairness_metric}_enforcer.o', '--save_policy', f'--saved_policy_file={tmp_saved_policy_path}']
 
     # Open the input file
     with open(tmp_input_path, 'r') as input_file:
@@ -288,9 +296,9 @@ def main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilo
     if debug > 0:
         print("Output:", result.stdout)
 
-    aux_output_path = f"experimental_results/dp_enforcer_policies/{base_filename}_output.txt"
-    with open(aux_output_path, 'w') as fp:
-        fp.write(result.stdout)
+        aux_output_path = f"experimental_results/dp_enforcer_policies/{base_filename}_output.txt"
+        with open(aux_output_path, 'w') as fp:
+            fp.write(result.stdout)
 
 
 

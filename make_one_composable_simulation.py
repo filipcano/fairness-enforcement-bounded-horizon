@@ -21,6 +21,9 @@ def parse_val_table(val_table_filepath, time_horizon):
     return df
 
 def compute_dp(gAseen, gAacc, gBseen, gBacc):
+    # if gAseen == 0 or gBseen == 0:
+    #     return 0
+    
     if gAseen == 0:
         gAseen = 1
         gAacc = 0
@@ -30,6 +33,9 @@ def compute_dp(gAseen, gAacc, gBseen, gBacc):
     return np.abs(gAacc/gAseen - gBacc/gBseen)
 
 def is_dp_smaller_or_equal_than_kappa(gAseen, gAacc, gBseen, gBacc, kappa):
+    # if gAseen == 0 or gBseen == 0:
+    #     return 0 <= kappa
+    
     if gAseen == 0:
         gAseen = 1
         gAacc = 0
@@ -116,22 +122,33 @@ def load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins,
     max_time_asleep = 300
     time_waited = 0
     while (time_waited < max_time_asleep) and (os.stat(shield_filepath).st_size == 0):
-        time.sleep(3)
-        time_waited += 3
+        time.sleep(0.1)
+        time_waited += 0.1
     # print("Time waited: ", time_waited)
 
 
     if time_waited >= max_time_asleep:
         raise Exception(f"Waited for more than 1 hour for shield to be computed on {shield_filepath}!")
     
+    # in rare cases, shield may have been computed but deleted by a parallel process. in such cases, compute it again
+
+    # try:
     shield_df = pd.read_csv(shield_filepath, delim_whitespace=True, header=None, 
-                 names=['rem_dec', 'gAseen', 'gAacc', 'gBacc', 'val'])
-    
-    # if is_shield_composable_buffered:
-        # os.remove(shield_filepath)
-    
+                names=['rem_dec', 'gAseen', 'gAacc', 'gBacc', 'val'])
     shield_df['gBseen'] = time_horizon - shield_df['rem_dec'] - shield_df['gAseen']
     shield_df.set_index(['gAseen', 'gAacc', 'gBseen', 'gBacc'], inplace=True)
+    # except Exception as e:
+    #     with open("logo.txt", "a") as fp:
+    #         fp.write(f"Exception: {e}\n")
+    #     # print("Had to recompute shield...")
+    #     shield_df = load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost_type, 
+    #                min_acc_rate, max_acc_rate, 
+    #                buff_gAacc, buff_gAseen, buff_gBacc, buff_gBseen, debug)
+    
+    if is_shield_composable_buffered:
+        time.sleep(0.3)
+        os.remove(shield_filepath)
+    
     return shield_df
 
 
@@ -615,8 +632,8 @@ def make_bounded_acc_rates_simulation(net, ml_model, ml_algo, dataset, data_load
             expected_cost_without_intervention.append(cost_keep)
 
         if gAseen <= np.ceil(1/dp_threshold) or gBseen <= np.ceil(1/dp_threshold):
-            failure = True
-            break
+            failure = failure or True
+            # break
     
     failure_log = [1 if failure else 0 for _ in log_gAacc]
     res_dict = {
@@ -677,8 +694,8 @@ def make_buffered_simulation(net, ml_model, ml_algo, dataset, data_loader, sensi
         debug=debug)
 
         if get_shield_value(shield_df,gAseen,gAacc,gBseen,gBacc,dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc) == np.inf:
-            failure = True
-            break
+            failure = failure or True
+            # break
 
         for step, (x, y, s) in enumerate(data_loader):
             

@@ -81,7 +81,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, default="erm", help="Model type")
     parser.add_argument("--target_attr", type=str, default="income", help="Target attribute for prediction")
     parser.add_argument("--sensitive_attr", type=str, default="sex", help="Sensitive attribute for fairness analysis")
-    parser.add_argument("--evaluation_metrics", type=str, default="acc,ap,dp,eopp,eodd", help="Evaluation metrics separated by commas, e.g., acc,ap,dp")
+    parser.add_argument("--evaluation_metrics", type=str, default="acc,ap,auc,f1,dp,eopp,eodd", help="Evaluation metrics separated by commas, e.g., acc,ap,dp")
     parser.add_argument("--log_freq", type=int, default=1, help="Logging frequency")
 
     parser.add_argument("--num_training_steps", type=int, default=150, help="Number of training steps")
@@ -255,6 +255,7 @@ if __name__ == "__main__":
     # model_name = f"../experimental_results/ML_models/model_{args.dataset}_{args.sensitive_attr}_{args.model}_{timestamp}.pkl"
 
     model_name = f"../experimental_results/ML_models/model_{args.dataset}_{args.sensitive_attr}_{args.model}.pkl"
+    log_name = f"../experimental_results/ML_models/model_{args.dataset}_{args.sensitive_attr}_{args.model}.txt"
 
     def add_numbering(name, i):
         extension = name.split('.')[-1]
@@ -265,6 +266,9 @@ if __name__ == "__main__":
         while (os.path.isfile(add_numbering(model_name, i))):
             i += 1
         model_name = add_numbering(model_name, i)
+        log_name = add_numbering(log_name, i)
     
     torch.save(net, model_name)
+    with open(log_name, 'w') as fp:
+        fp.write(table)
 

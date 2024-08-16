@@ -125,32 +125,33 @@ def load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins,
         # print("Done with shield")
 
     # if the file exists, but it's empty, wait 3s to see if someone else computes it. Eventually stop and raise an error if you waited too much
-    max_time_asleep = 300
+    max_time_asleep = 1200
     time_waited = 0
     while (time_waited < max_time_asleep) and (os.stat(shield_filepath).st_size == 0):
-        time.sleep(3)
-        time_waited += 3
+        time.sleep(0.1)
+        time_waited += 0.1
     # print("Time waited: ", time_waited)
 
 
     if time_waited >= max_time_asleep:
-        raise Exception(f"Waited for more than 1 hour for shield to be computed on {shield_filepath}!")
+        raise Exception(f"Waited for more than 20min for shield to be computed on {shield_filepath}!")
     
     # in rare cases, shield may have been computed but deleted by a parallel process. in such cases, compute it again
 
-    try:
-        shield_df = pd.read_csv(shield_filepath, delim_whitespace=True, header=None, 
-                    names=['rem_dec', 'gAseen', 'gAacc', 'gBseen', 'gBacc', 'prev_step', 'val'])
-        shield_df.set_index(['rem_dec', 'gAseen', 'gAacc', 'gBseen', 'gBacc', 'prev_step'], inplace=True)
-    except Exception as e:
-        with open("logo.txt", "a") as fp:
-            fp.write(f"Exception: {e}\n")
-        # print("Had to recompute shield...")
-        shield_df = load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost_type, 
-                   min_acc_rate, max_acc_rate, 
-                   buff_gAacc, buff_gAseen, buff_gBacc, buff_gBseen, debug)
+    # try:
+    shield_df = pd.read_csv(shield_filepath, delim_whitespace=True, header=None, 
+                names=['rem_dec', 'gAseen', 'gAacc', 'gBseen', 'gBacc', 'prev_step', 'val'])
+    shield_df.set_index(['rem_dec', 'gAseen', 'gAacc', 'gBseen', 'gBacc', 'prev_step'], inplace=True)
+    # except Exception as e:
+    #     with open("logo.txt", "a") as fp:
+    #         fp.write(f"Exception: {e}\n")
+    #     # print("Had to recompute shield...")
+    #     shield_df = load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_epsilon, cost_type, 
+    #                min_acc_rate, max_acc_rate, 
+    #                buff_gAacc, buff_gAseen, buff_gBacc, buff_gBseen, debug)
     
     if is_shield_composable_buffered:
+        time.sleep(0.3)
         os.remove(shield_filepath)
     
     return shield_df
@@ -172,23 +173,15 @@ def get_shield_value(df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_th
         return 0
     return np.inf
 
-def encode_prev_step(gt, g, d):
-    if ((gt == 0) and (g == 0) and (d == 0)): 
+def encode_prev_step(g, d):
+    if ((g == 0) and (d == 0)): 
         return 0
-    if ((gt == 0) and (g == 0) and (d == 1)): 
+    if ((g == 0) and (d == 1)): 
         return 1
-    if ((gt == 0) and (g == 1) and (d == 0)): 
+    if ((g == 1) and (d == 0)): 
         return 2
-    if ((gt == 0) and (g == 1) and (d == 1)): 
+    if ((g == 1) and (d == 1)): 
         return 3
-    if ((gt == 1) and (g == 0) and (d == 0)): 
-        return 4
-    if ((gt == 1) and (g == 0) and (d == 1)): 
-        return 5
-    if ((gt == 1) and (g == 1) and (d == 0)): 
-        return 6
-    if ((gt == 1) and (g == 1) and (d == 1)): 
-        return 7
     return -1
 
 def decode_prev_step(prev_step):
@@ -198,20 +191,18 @@ def decode_prev_step(prev_step):
     gBseen_plus = 0
     prevDec = (prev_step)%2
     prevG = (prev_step/2)%2
-    prevGT = (prev_step/4)%2
-    if (prevGT == 1):
-        if (prevG == 0):
-            gAseen_plus = 1
-            if (prevDec == 1): 
-                gAacc_plus = 1
-        else:
-            gBseen_plus = 1
-            if (prevDec == 1):
-                gBacc_plus = 1
+    if (prevG == 0):
+        gAseen_plus = 1
+        if (prevDec == 1): 
+            gAacc_plus = 1
+    else:
+        gBseen_plus = 1
+        if (prevDec == 1):
+            gBacc_plus = 1
         
     return gAacc_plus, gAseen_plus, gBacc_plus, gBseen_plus
 
-
+#This is EqOpp
 def make_long_window_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
                           n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, debug=0):
 
@@ -252,7 +243,7 @@ def make_long_window_simulation(net, ml_model, ml_algo, dataset, data_loader, se
         # print()
         # print(y.numpy()[0] == 0)
         y = y.detach().numpy()[0]
-        s = s.detach().numpy()[0]
+        s_detached = s.detach().numpy()[0]
         # print(s)
         # if y == 0:
         #     y = 1
@@ -279,21 +270,31 @@ def make_long_window_simulation(net, ml_model, ml_algo, dataset, data_loader, se
         cost_keep = None
         cost_change = None
         rem_dec = time_horizon*n_windows - step -1 # maybe +- 1
-
-        # if (s == 0): # Group A --> this if is not needed anymore, as prev_step takes care of it
-        prev_step = encode_prev_step(1, s, 1)
-        expected_cost_accept_gt1 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
-        prev_step = encode_prev_step(0, s, 1)
-        expected_cost_accept_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
-        # print(score, expected_cost_accept_gt0, expected_cost_accept_gt1)
         
-        expected_cost_after_accept = score*expected_cost_accept_gt1 + (1-score)*expected_cost_accept_gt0
+        if (s_detached == 0): # Group A --> this if is not needed anymore, as prev_step takes care of it
+            prev_step = encode_prev_step(s, 1)
+            expected_cost_accept_gt1 = get_shield_value(shield_df, rem_dec, gAseen+1, gAacc+1, gBseen, gBacc, prev_step, dp_threshold)
+            expected_cost_accept_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+            # print(score, expected_cost_accept_gt0, expected_cost_accept_gt1)
+            
+            expected_cost_after_accept = score*expected_cost_accept_gt1 + (1-score)*expected_cost_accept_gt0
 
-        prev_step = encode_prev_step(1, s, 0)
-        expected_cost_reject_gt1 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
-        prev_step = encode_prev_step(0, s, 0)
-        expected_cost_reject_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
-        expected_cost_after_reject = (1-score)*expected_cost_reject_gt1 + (score)*expected_cost_reject_gt0
+            prev_step = encode_prev_step(s, 0)
+            expected_cost_reject_gt1 = get_shield_value(shield_df, rem_dec, gAseen+1, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+            expected_cost_reject_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+            expected_cost_after_reject = (1-score)*expected_cost_reject_gt1 + (score)*expected_cost_reject_gt0
+        else :
+            prev_step = encode_prev_step(s, 1)
+            expected_cost_accept_gt1 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen+1, gBacc+1, prev_step, dp_threshold)
+            expected_cost_accept_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+            # print(score, expected_cost_accept_gt0, expected_cost_accept_gt1)
+            
+            expected_cost_after_accept = score*expected_cost_accept_gt1 + (1-score)*expected_cost_accept_gt0
+
+            prev_step = encode_prev_step(s, 0)
+            expected_cost_reject_gt1 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen+1, gBacc, prev_step, dp_threshold)
+            expected_cost_reject_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+            expected_cost_after_reject = (1-score)*expected_cost_reject_gt1 + (score)*expected_cost_reject_gt0
 
 
         
@@ -319,7 +320,7 @@ def make_long_window_simulation(net, ml_model, ml_algo, dataset, data_loader, se
         final_label = 1 if is_decision_accept else 0
         ml_proposed_label = 1 if net_proposes_accept else 0
 
-        if s == 0:
+        if s_detached == 0:
             if y == 1:
                 gAseen += 1
                 if is_decision_accept:
@@ -359,24 +360,195 @@ def make_long_window_simulation(net, ml_model, ml_algo, dataset, data_loader, se
         expected_cost_without_intervention.append(cost_keep)  
 
 
-        # print("\nStep: ", step)
-        # print(f"{s=}, {y=}")
-        # print(f"{score=:2f}, {ml_proposed_label=}, {final_label=}")
-        # print(f"{cost_of_intervention=:.2f}")
-        # print(f"{expected_cost_after_accept=:.2f}")
-        # print(f"{expected_cost_after_reject=:.2f}")
-        # print(f"{cost_keep=:.2f}")
-        # print(f"{cost_change=:.2f}")
-        # print(f"{ml_proposed_label=}, {final_label=}")
-        # print(f"{gAseen=}, {gAacc=}, {gBseen=}, {gBacc=}")
 
-        # val_series = shield_df['val']
-        # # Use 'get' with a default value of -1 (assumes cost is always positive)
-        # val = val_series.get((gAseen, gAacc, gBseen, gBacc), -1)
-        # print(f"{val=}")
-        # if s == 0:
+        
+    failure_log = [1 if False else 0 for _ in log_gAacc] # long_window has no failure condition
+    res_dict = {
+        "gAseen" : log_gAseen,
+        "gAacc" : log_gAacc,
+        "gBseen" : log_gBseen,
+        "gBacc" : log_gBacc,
+        "gAseen0" : log_gAseen0,
+        "gAacc0" : log_gAacc0,
+        "gBseen0" : log_gBseen0,
+        "gBacc0" : log_gBacc0,
+        "cost" : cost_decision,
+        "utility" : utility,
+        "exp_cost_int" : expected_cost_with_intervention,
+        "exp_cost_no_int" : expected_cost_without_intervention,
+        "failure" : failure_log
+    }
+    
+    res_df = pd.DataFrame(res_dict)
+    return res_df
 
-        #     print(f"Group A: {s == 0}")
+
+#This is EqOpp
+def make_naive_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
+                          n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, debug=0):
+
+    """
+    See make_one_simulation() for documentation on the input-output of this function
+    """
+    
+    shield_df = load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, debug=debug)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # print(f"{dp_threshold=}")
+
+    log_gAseen = []
+    log_gAacc = []
+    log_gBseen = []
+    log_gBacc = []
+    log_gAseen0 = []
+    log_gAacc0 = []
+    log_gBseen0 = []
+    log_gBacc0 = []
+    cost_decision = [] # cost of each decision. Add to get cost of the run
+    utility = [] # utility of each decision. Add to get utility of run
+    expected_cost_with_intervention = []
+    expected_cost_without_intervention = []
+
+
+    cum_gAseen = 0
+    cum_gAacc = 0
+    cum_gBseen = 0
+    cum_gBacc = 0
+    cum_gAseen0 = 0
+    cum_gAacc0 = 0
+    cum_gBseen0 = 0
+    cum_gBacc0 = 0
+    prev_step = 0
+
+    for window_it in range(n_windows):
+        gAseen = 0
+        gAacc = 0
+        gBseen = 0
+        gBacc = 0
+
+        for step, (x, y, s) in enumerate(data_loader):
+            y = y.detach().numpy()[0]
+            s_detached = s.detach().numpy()[0]
+            # print(s)
+            # if y == 0:
+            #     y = 1
+            # else:
+            #     y = 0
+
+            
+            if step >= time_horizon:
+                break
+            if ml_algo == "laftr":
+                h, decoded, output, adv_pred = net(x.to(device), s.to(device))
+            else:
+                h, output = net(x.to(device))
+                
+            score = output.detach().cpu().numpy()[0]
+            net_proposes_accept = score > 0.5
+            # print(score, net_proposes_accept)
+            cost_of_intervention = np.abs(score - 0.5)
+            if score > 0.5: 
+                score = score - 1e-8
+            if score < 0.5:
+                score = score + 1e-8
+
+            cost_keep = None
+            cost_change = None
+            rem_dec = time_horizon - step -1 # maybe +- 1
+            
+            if (s_detached == 0): # Group A --> this if is not needed anymore, as prev_step takes care of it
+                prev_step = encode_prev_step(s_detached, 1)
+                expected_cost_accept_gt1 = get_shield_value(shield_df, rem_dec, gAseen+1, gAacc+1, gBseen, gBacc, prev_step, dp_threshold)
+                expected_cost_accept_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+                # print(score, expected_cost_accept_gt0, expected_cost_accept_gt1)
+                
+                expected_cost_after_accept = score*expected_cost_accept_gt1 + (1-score)*expected_cost_accept_gt0
+
+                prev_step = encode_prev_step(s_detached, 0)
+                expected_cost_reject_gt1 = get_shield_value(shield_df, rem_dec, gAseen+1, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+                expected_cost_reject_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+                expected_cost_after_reject = (1-score)*expected_cost_reject_gt1 + (score)*expected_cost_reject_gt0
+            else :
+                prev_step = encode_prev_step(s_detached, 1)
+                expected_cost_accept_gt1 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen+1, gBacc+1, prev_step, dp_threshold)
+                expected_cost_accept_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+                # print(score, expected_cost_accept_gt0, expected_cost_accept_gt1)
+                
+                expected_cost_after_accept = score*expected_cost_accept_gt1 + (1-score)*expected_cost_accept_gt0
+
+                prev_step = encode_prev_step(s_detached, 0)
+                expected_cost_reject_gt1 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen+1, gBacc, prev_step, dp_threshold)
+                expected_cost_reject_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+                expected_cost_after_reject = (1-score)*expected_cost_reject_gt1 + (score)*expected_cost_reject_gt0
+
+
+            
+            if net_proposes_accept:
+                cost_keep = expected_cost_after_accept
+                cost_change = cost_of_intervention + expected_cost_after_reject
+
+                if cost_keep <= cost_change:
+                    is_decision_accept = True
+                else:
+                    is_decision_accept = not(np.random.random() <= lambda_decision)
+                    
+            else: # net proposes reject
+                cost_keep = expected_cost_after_reject
+                cost_change = cost_of_intervention + expected_cost_after_accept
+                if cost_keep <= cost_change:
+                    is_decision_accept = False
+                else:
+                    is_decision_accept = np.random.random() <= lambda_decision
+
+            
+                        
+            final_label = 1 if is_decision_accept else 0
+            ml_proposed_label = 1 if net_proposes_accept else 0
+
+            if s_detached == 0:
+                if y == 1:
+                    gAseen += 1
+                    cum_gAseen += 1
+                    if is_decision_accept:
+                        gAacc += 1
+                        cum_gAacc += 1
+                else:
+                    cum_gAseen0 += 1
+                    if is_decision_accept:
+                        cum_gAacc0 += 1
+            else:
+                if y == 1:
+                    gBseen += 1
+                    cum_gBseen += 1
+                    if is_decision_accept:
+                        gBacc += 1
+                        cum_gBacc += 1
+                else:
+                    cum_gBseen0 += 1
+                    if is_decision_accept:
+                        cum_gBacc0 += 1
+                
+
+            # prev_step = encode_prev_step(y, s, final_label)
+
+            utility.append(1 - np.abs(final_label - y))
+            if final_label == ml_proposed_label:
+                cost_decision.append(0)
+            else:
+                cost_decision.append(cost_of_intervention)
+
+            log_gAseen.append(cum_gAseen)
+            log_gAacc.append(cum_gAacc)
+            log_gBseen.append(cum_gBseen)
+            log_gBacc.append(cum_gBacc)   
+            log_gAseen0.append(cum_gAseen0)
+            log_gAacc0.append(cum_gAacc0)
+            log_gBseen0.append(cum_gBseen0)
+            log_gBacc0.append(cum_gBacc0)   
+            expected_cost_with_intervention.append(cost_change)
+            expected_cost_without_intervention.append(cost_keep)  
+
+
 
 
         
@@ -401,6 +573,7 @@ def make_long_window_simulation(net, ml_model, ml_algo, dataset, data_loader, se
     return res_df
 
 
+# This is EqOpp -- not tested
 def make_no_shield_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
                           n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, debug=0):
 
@@ -416,6 +589,10 @@ def make_no_shield_simulation(net, ml_model, ml_algo, dataset, data_loader, sens
     log_gAacc = []
     log_gBseen = []
     log_gBacc = []
+    log_gAseen0 = []
+    log_gAacc0 = []
+    log_gBseen0 = []
+    log_gBacc0 = []
     cost_decision = [] # cost of each decision. Add to get cost of the run
     utility = [] # utility of each decision. Add to get utility of run
     expected_cost_with_intervention = []
@@ -427,16 +604,17 @@ def make_no_shield_simulation(net, ml_model, ml_algo, dataset, data_loader, sens
     cum_gAacc = 0
     cum_gBseen = 0
     cum_gBacc = 0
+    cum_gAseen0 = 0
+    cum_gAacc0 = 0
+    cum_gBseen0 = 0
+    cum_gBacc0 = 0
 
     
 
     for window_it in range(n_windows):
-        gAseen = 0
-        gAacc = 0
-        gBseen = 0
-        gBacc = 0
-
         for step, (x, y, s) in enumerate(data_loader):
+            y = y.detach().numpy()[0]
+            s_detached = s.detach().numpy()[0]
             
             if step >= time_horizon:
                 break
@@ -452,28 +630,35 @@ def make_no_shield_simulation(net, ml_model, ml_algo, dataset, data_loader, sens
 
             cost_keep = None
             cost_change = None
-
-            if (s == 0): # Group A, I think
-                gAseen += 1
-                cum_gAseen += 1
-            else: # Group B, I think
-                gBseen += 1
-                cum_gBseen += 1
-
             is_decision_accept = net_proposes_accept
 
-            if is_decision_accept:
-                if s == 0:
-                    gAacc += 1
-                    cum_gAacc += 1
-                else:
-                    gBacc += 1
-                    cum_gBacc += 1
+            if (y == 1):
+                if (s_detached == 0): # Group A
+                    cum_gAseen += 1
+                    if is_decision_accept:
+                        cum_gAacc += 1
+                else: # Group B
+                    cum_gBseen += 1
+                    if is_decision_accept:
+                        cum_gBacc += 1
+            else:
+                if (s_detached == 0): # Group A
+                    cum_gAseen0 += 1
+                    if is_decision_accept:
+                        cum_gAacc0 += 1
+                else: # Group B
+                    cum_gBseen0 += 1
+                    if is_decision_accept:
+                        cum_gBacc0 +=1
+
+            
+
+            
                         
             final_label = 1 if is_decision_accept else 0
             ml_proposed_label = 1 if net_proposes_accept else 0
 
-            utility.append(1 - np.abs(final_label - y.detach().numpy()[0]))
+            utility.append(1 - np.abs(final_label - y))
             if final_label == ml_proposed_label:
                 cost_decision.append(0)
             else:
@@ -483,6 +668,10 @@ def make_no_shield_simulation(net, ml_model, ml_algo, dataset, data_loader, sens
             log_gAacc.append(cum_gAacc)
             log_gBseen.append(cum_gBseen)
             log_gBacc.append(cum_gBacc)
+            log_gAseen0.append(cum_gAseen0)
+            log_gAacc0.append(cum_gAacc0)
+            log_gBseen0.append(cum_gBseen0)
+            log_gBacc0.append(cum_gBacc0)
             expected_cost_with_intervention.append(cost_change)
             expected_cost_without_intervention.append(cost_keep)
     
@@ -492,6 +681,10 @@ def make_no_shield_simulation(net, ml_model, ml_algo, dataset, data_loader, sens
         "gAacc" : log_gAacc,
         "gBseen" : log_gBseen,
         "gBacc" : log_gBacc,
+        "gAseen0" : log_gAseen0,
+        "gAacc0" : log_gAacc0,
+        "gBseen0" : log_gBseen0,
+        "gBacc0" : log_gBacc0,
         "cost" : cost_decision,
         "utility" : utility,
         "exp_cost_int" : expected_cost_with_intervention,
@@ -499,142 +692,24 @@ def make_no_shield_simulation(net, ml_model, ml_algo, dataset, data_loader, sens
         "failure" : failure_log
     }
 
-    res_df = pd.DataFrame(res_dict)
-
-    return res_df
-
-
-def make_naive_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
-                          n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, debug=0):
-
-    """
-    See make_one_simulation() for documentation on the input-output of this function
-    """
-
-    shield_df = load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, debug=debug)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    # print(f"{dp_threshold=}")
-
-    log_gAseen = []
-    log_gAacc = []
-    log_gBseen = []
-    log_gBacc = []
-    cost_decision = [] # cost of each decision. Add to get cost of the run
-    utility = [] # utility of each decision. Add to get utility of run
-    expected_cost_with_intervention = []
-    expected_cost_without_intervention = []
-
-
-    # cummulative versions
-    cum_gAseen = 0
-    cum_gAacc = 0
-    cum_gBseen = 0
-    cum_gBacc = 0
-
-    
-
-    for window_it in range(n_windows):
-        gAseen = 0
-        gAacc = 0
-        gBseen = 0
-        gBacc = 0
-
-        for step, (x, y, s) in enumerate(data_loader):
-            
-            if step >= time_horizon:
-                break
-
-            if ml_algo == "laftr":
-                h, decoded, output, adv_pred = net(x.to(device), s.to(device))
-            else:
-                h, output = net(x.to(device))
-
-            score = output.detach().cpu().numpy()[0]
-            net_proposes_accept = score > 0.5
-            cost_of_intervention = np.abs(score - 0.5)
-
-            cost_keep = None
-            cost_change = None
-
-            if (s == 0): # Group A, I think
-                gAseen += 1
-                cum_gAseen += 1
-                expected_cost_after_accept = get_shield_value(shield_df, gAseen, gAacc+1, gBseen, gBacc, dp_threshold)
-                expected_cost_after_reject = get_shield_value(shield_df, gAseen, gAacc, gBseen, gBacc, dp_threshold)
-            else: # Group B, I think
-                gBseen += 1
-                cum_gBseen += 1
-                expected_cost_after_accept = get_shield_value(shield_df, gAseen, gAacc, gBseen, gBacc+1, dp_threshold)
-                expected_cost_after_reject = get_shield_value(shield_df, gAseen, gAacc, gBseen, gBacc, dp_threshold)
-
-            
-            if net_proposes_accept:
-                cost_keep = expected_cost_after_accept
-                cost_change = cost_of_intervention + expected_cost_after_reject
-
-                if cost_keep <= cost_change:
-                    is_decision_accept = True
-                else:
-                    is_decision_accept = not(np.random.random() <= lambda_decision)
-                    
-            else: # net proposes reject
-                cost_keep = expected_cost_after_reject
-                cost_change = cost_of_intervention + expected_cost_after_accept
-                if cost_keep <= cost_change:
-                    is_decision_accept = False
-                else:
-                    is_decision_accept = np.random.random() <= lambda_decision
-            if is_decision_accept:
-                if s == 0:
-                    gAacc += 1
-                    cum_gAacc += 1
-                else:
-                    gBacc += 1
-                    cum_gBacc += 1
-                        
-            final_label = 1 if is_decision_accept else 0
-            ml_proposed_label = 1 if net_proposes_accept else 0
-
-            utility.append(1 - np.abs(final_label - y.detach().numpy()[0]))
-            if final_label == ml_proposed_label:
-                cost_decision.append(0)
-            else:
-                cost_decision.append(cost_of_intervention)
-
-            log_gAseen.append(cum_gAseen)
-            log_gAacc.append(cum_gAacc)
-            log_gBseen.append(cum_gBseen)
-            log_gBacc.append(cum_gBacc)
-            expected_cost_with_intervention.append(cost_change)
-            expected_cost_without_intervention.append(cost_keep)
-    
-    failure_log = [1 if False else 0 for _ in log_gAacc] # naive has no failure condition
-    res_dict = {
-        "gAseen" : log_gAseen,
-        "gAacc" : log_gAacc,
-        "gBseen" : log_gBseen,
-        "gBacc" : log_gBacc,
-        "cost" : cost_decision,
-        "utility" : utility,
-        "exp_cost_int" : expected_cost_with_intervention,
-        "exp_cost_no_int" : expected_cost_without_intervention,
-        "failure" : failure_log
-    }
+    # for key in res_dict:
+    #     print(f"{key}: {len(res_dict[key])}")
 
     res_df = pd.DataFrame(res_dict)
 
     return res_df
 
 
+
+#This is EqOpp -- not tested
 def make_bounded_acc_rates_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
-                          n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, 
-                          min_acc_rate, max_acc_rate, debug=0):
-    
+                        n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type,
+                        min_acc_rate, max_acc_rate, debug=0):
+
     """
     See make_one_simulation() for documentation on the input-output of this function
     """
-
+    
     shield_df = load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, 
                                min_acc_rate=min_acc_rate, max_acc_rate=max_acc_rate, debug=debug)
 
@@ -645,16 +720,25 @@ def make_bounded_acc_rates_simulation(net, ml_model, ml_algo, dataset, data_load
     log_gAacc = []
     log_gBseen = []
     log_gBacc = []
+    log_gAseen0 = []
+    log_gAacc0 = []
+    log_gBseen0 = []
+    log_gBacc0 = []
     cost_decision = [] # cost of each decision. Add to get cost of the run
     utility = [] # utility of each decision. Add to get utility of run
     expected_cost_with_intervention = []
     expected_cost_without_intervention = []
 
-    # cummulative versions
+
     cum_gAseen = 0
     cum_gAacc = 0
     cum_gBseen = 0
     cum_gBacc = 0
+    cum_gAseen0 = 0
+    cum_gAacc0 = 0
+    cum_gBseen0 = 0
+    cum_gBacc0 = 0
+    prev_step = 0
 
     failure = False # this flag gets true if in some windows, the problem is unenforceable
 
@@ -665,32 +749,60 @@ def make_bounded_acc_rates_simulation(net, ml_model, ml_algo, dataset, data_load
         gBacc = 0
 
         for step, (x, y, s) in enumerate(data_loader):
+            y = y.detach().numpy()[0]
+            s_detached = s.detach().numpy()[0]
+            # print(s)
+            # if y == 0:
+            #     y = 1
+            # else:
+            #     y = 0
+
             
             if step >= time_horizon:
                 break
-
             if ml_algo == "laftr":
                 h, decoded, output, adv_pred = net(x.to(device), s.to(device))
             else:
                 h, output = net(x.to(device))
-
+                
             score = output.detach().cpu().numpy()[0]
             net_proposes_accept = score > 0.5
+            # print(score, net_proposes_accept)
             cost_of_intervention = np.abs(score - 0.5)
+            if score > 0.5: 
+                score = score - 1e-8
+            if score < 0.5:
+                score = score + 1e-8
 
             cost_keep = None
             cost_change = None
+            rem_dec = time_horizon - step -1 # maybe +- 1
+            
+            if (s_detached == 0): # Group A --> this if is not needed anymore, as prev_step takes care of it
+                prev_step = encode_prev_step(s_detached, 1)
+                expected_cost_accept_gt1 = get_shield_value(shield_df, rem_dec, gAseen+1, gAacc+1, gBseen, gBacc, prev_step, dp_threshold)
+                expected_cost_accept_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+                # print(score, expected_cost_accept_gt0, expected_cost_accept_gt1)
+                
+                expected_cost_after_accept = score*expected_cost_accept_gt1 + (1-score)*expected_cost_accept_gt0
 
-            if (s == 0): # Group A, I think
-                gAseen += 1
-                cum_gAseen += 1
-                expected_cost_after_accept = get_shield_value(shield_df, gAseen, gAacc+1, gBseen, gBacc, dp_threshold)
-                expected_cost_after_reject = get_shield_value(shield_df, gAseen, gAacc, gBseen, gBacc, dp_threshold)
-            else: # Group B, I think
-                gBseen += 1
-                cum_gBseen += 1
-                expected_cost_after_accept = get_shield_value(shield_df, gAseen, gAacc, gBseen, gBacc+1, dp_threshold)
-                expected_cost_after_reject = get_shield_value(shield_df, gAseen, gAacc, gBseen, gBacc, dp_threshold)
+                prev_step = encode_prev_step(s_detached, 0)
+                expected_cost_reject_gt1 = get_shield_value(shield_df, rem_dec, gAseen+1, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+                expected_cost_reject_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+                expected_cost_after_reject = (1-score)*expected_cost_reject_gt1 + (score)*expected_cost_reject_gt0
+            else :
+                prev_step = encode_prev_step(s_detached, 1)
+                expected_cost_accept_gt1 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen+1, gBacc+1, prev_step, dp_threshold)
+                expected_cost_accept_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+                # print(score, expected_cost_accept_gt0, expected_cost_accept_gt1)
+                
+                expected_cost_after_accept = score*expected_cost_accept_gt1 + (1-score)*expected_cost_accept_gt0
+
+                prev_step = encode_prev_step(s_detached, 0)
+                expected_cost_reject_gt1 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen+1, gBacc, prev_step, dp_threshold)
+                expected_cost_reject_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold)
+                expected_cost_after_reject = (1-score)*expected_cost_reject_gt1 + (score)*expected_cost_reject_gt0
+
 
             
             if net_proposes_accept:
@@ -709,18 +821,39 @@ def make_bounded_acc_rates_simulation(net, ml_model, ml_algo, dataset, data_load
                     is_decision_accept = False
                 else:
                     is_decision_accept = np.random.random() <= lambda_decision
-            if is_decision_accept:
-                if s == 0:
-                    gAacc += 1
-                    cum_gAacc += 1
-                else:
-                    gBacc += 1
-                    cum_gBacc += 1
+
+            
                         
             final_label = 1 if is_decision_accept else 0
             ml_proposed_label = 1 if net_proposes_accept else 0
 
-            utility.append(1 - np.abs(final_label - y.detach().numpy()[0]))
+            if s_detached == 0:
+                if y == 1:
+                    gAseen += 1
+                    cum_gAseen += 1
+                    if is_decision_accept:
+                        gAacc += 1
+                        cum_gAacc += 1
+                else:
+                    cum_gAseen0 += 1
+                    if is_decision_accept:
+                        cum_gAacc0 += 1
+            else:
+                if y == 1:
+                    gBseen += 1
+                    cum_gBseen += 1
+                    if is_decision_accept:
+                        gBacc += 1
+                        cum_gBacc += 1
+                else:
+                    cum_gBseen0 += 1
+                    if is_decision_accept:
+                        cum_gBacc0 += 1
+                
+
+            # prev_step = encode_prev_step(y, s, final_label)
+
+            utility.append(1 - np.abs(final_label - y))
             if final_label == ml_proposed_label:
                 cost_decision.append(0)
             else:
@@ -729,38 +862,52 @@ def make_bounded_acc_rates_simulation(net, ml_model, ml_algo, dataset, data_load
             log_gAseen.append(cum_gAseen)
             log_gAacc.append(cum_gAacc)
             log_gBseen.append(cum_gBseen)
-            log_gBacc.append(cum_gBacc)
+            log_gBacc.append(cum_gBacc)   
+            log_gAseen0.append(cum_gAseen0)
+            log_gAacc0.append(cum_gAacc0)
+            log_gBseen0.append(cum_gBseen0)
+            log_gBacc0.append(cum_gBacc0)   
             expected_cost_with_intervention.append(cost_change)
-            expected_cost_without_intervention.append(cost_keep)
+            expected_cost_without_intervention.append(cost_keep)  
 
         if gAseen <= np.ceil(1/dp_threshold) or gBseen <= np.ceil(1/dp_threshold):
             failure = failure or True
-            break
-    
-    failure_log = [1 if failure else 0 for _ in log_gAacc]
+            # break
+
+
+
+        
+    failure_log = [1 if failure else 0 for _ in log_gAacc] # long_window has no failure condition
     res_dict = {
         "gAseen" : log_gAseen,
         "gAacc" : log_gAacc,
         "gBseen" : log_gBseen,
         "gBacc" : log_gBacc,
+        "gAseen0" : log_gAseen0,
+        "gAacc0" : log_gAacc0,
+        "gBseen0" : log_gBseen0,
+        "gBacc0" : log_gBacc0,
         "cost" : cost_decision,
         "utility" : utility,
         "exp_cost_int" : expected_cost_with_intervention,
         "exp_cost_no_int" : expected_cost_without_intervention,
         "failure" : failure_log
     }
-
+    
     res_df = pd.DataFrame(res_dict)
-
     return res_df
 
 
+# This is EqOpp
 def make_buffered_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
                           n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, debug=0):
 
     """
     See make_one_simulation() for documentation on the input-output of this function
     """
+    
+    shield_df = load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, debug=debug)
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # print(f"{dp_threshold=}")
 
@@ -768,15 +915,31 @@ def make_buffered_simulation(net, ml_model, ml_algo, dataset, data_loader, sensi
     log_gAacc = []
     log_gBseen = []
     log_gBacc = []
+    log_gAseen0 = []
+    log_gAacc0 = []
+    log_gBseen0 = []
+    log_gBacc0 = []
     cost_decision = [] # cost of each decision. Add to get cost of the run
     utility = [] # utility of each decision. Add to get utility of run
     expected_cost_with_intervention = []
     expected_cost_without_intervention = []
 
+
+    gAseen = 0
+    gAacc = 0
+    gBseen = 0
+    gBacc = 0
+    prev_step = 0
+
     cum_gAseen = 0
     cum_gAacc = 0
     cum_gBseen = 0
     cum_gBacc = 0
+
+    cum_gAseen0 = 0
+    cum_gAacc0 = 0
+    cum_gBseen0 = 0
+    cum_gBacc0 = 0
 
     failure = False # this flag gets true if in some windows, the problem is unenforceable
 
@@ -785,6 +948,7 @@ def make_buffered_simulation(net, ml_model, ml_algo, dataset, data_loader, sensi
         gAacc = 0
         gBseen = 0
         gBacc = 0
+        prev_step = 0
 
         buff_gAseen = cum_gAseen
         buff_gAacc = cum_gAacc
@@ -792,40 +956,69 @@ def make_buffered_simulation(net, ml_model, ml_algo, dataset, data_loader, sensi
         buff_gBacc = cum_gBacc
 
         shield_df = load_shield_df(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, 
-        buff_gAacc=buff_gAacc, buff_gAseen=buff_gAseen, buff_gBacc=buff_gBacc, buff_gBseen=buff_gBseen,
-        debug=debug)
-
-        if get_shield_value(shield_df,gAseen,gAacc,gBseen,gBacc,dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc) == np.inf:
+                                   buff_gAacc=buff_gAacc, buff_gAseen=buff_gAseen, buff_gBacc=buff_gBacc, buff_gBseen=buff_gBseen,
+                                   debug=debug)
+        if get_shield_value(shield_df,gAseen,gAacc,gBseen,gBacc,prev_step,dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc) == np.inf:
             failure = failure or True
-            break
-
+            # break
         for step, (x, y, s) in enumerate(data_loader):
+            # print()
+            # print(y.numpy()[0] == 0)
+            y = y.detach().numpy()[0]
+            s_detached = s.detach().numpy()[0]
+            # print(s)
+            # if y == 0:
+            #     y = 1
+            # else:
+            #     y = 0
+
             
             if step >= time_horizon:
                 break
-
             if ml_algo == "laftr":
                 h, decoded, output, adv_pred = net(x.to(device), s.to(device))
             else:
                 h, output = net(x.to(device))
-
+                
             score = output.detach().cpu().numpy()[0]
             net_proposes_accept = score > 0.5
+            # print(score, net_proposes_accept)
             cost_of_intervention = np.abs(score - 0.5)
+            # score is padded so that it is not exactly one or exactly zero. this is done so that score*inf or (1-score)*inf is always inf
+            if score > 0.5: 
+                score = score - 1e-8
+            if score < 0.5:
+                score = score + 1e-8
 
             cost_keep = None
             cost_change = None
+            rem_dec = time_horizon - step -1 # maybe +- 1
+            
+            if (s_detached == 0): # Group A --> this if is not needed anymore, as prev_step takes care of it
+                prev_step = encode_prev_step(s_detached, 1)
+                expected_cost_accept_gt1 = get_shield_value(shield_df, rem_dec, gAseen+1, gAacc+1, gBseen, gBacc, prev_step, dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc)
+                expected_cost_accept_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc)
+                # print(score, expected_cost_accept_gt0, expected_cost_accept_gt1)
+                
+                expected_cost_after_accept = score*expected_cost_accept_gt1 + (1-score)*expected_cost_accept_gt0
 
-            if (s == 0): # Group A, I think
-                gAseen += 1
-                cum_gAseen += 1
-                expected_cost_after_accept = get_shield_value(shield_df,gAseen,gAacc+1,gBseen,gBacc,dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc) 
-                expected_cost_after_reject = get_shield_value(shield_df,gAseen,gAacc,gBseen,gBacc,dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc)
-            else: # Group B, I think
-                gBseen += 1
-                cum_gBseen += 1
-                expected_cost_after_accept = get_shield_value(shield_df,gAseen,gAacc,gBseen,gBacc+1,dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc)
-                expected_cost_after_reject = get_shield_value(shield_df,gAseen,gAacc,gBseen,gBacc,dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc)
+                prev_step = encode_prev_step(s_detached, 0)
+                expected_cost_reject_gt1 = get_shield_value(shield_df, rem_dec, gAseen+1, gAacc, gBseen, gBacc, prev_step, dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc)
+                expected_cost_reject_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc)
+                expected_cost_after_reject = (1-score)*expected_cost_reject_gt1 + (score)*expected_cost_reject_gt0
+            else :
+                prev_step = encode_prev_step(s_detached, 1)
+                expected_cost_accept_gt1 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen+1, gBacc+1, prev_step, dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc)
+                expected_cost_accept_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc)
+                # print(score, expected_cost_accept_gt0, expected_cost_accept_gt1)
+                
+                expected_cost_after_accept = score*expected_cost_accept_gt1 + (1-score)*expected_cost_accept_gt0
+
+                prev_step = encode_prev_step(s_detached, 0)
+                expected_cost_reject_gt1 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen+1, gBacc, prev_step, dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc)
+                expected_cost_reject_gt0 = get_shield_value(shield_df, rem_dec, gAseen, gAacc, gBseen, gBacc, prev_step, dp_threshold,buff_gAseen,buff_gAacc,buff_gBseen,buff_gBacc)
+                expected_cost_after_reject = (1-score)*expected_cost_reject_gt1 + (score)*expected_cost_reject_gt0
+
 
             
             if net_proposes_accept:
@@ -844,18 +1037,39 @@ def make_buffered_simulation(net, ml_model, ml_algo, dataset, data_loader, sensi
                     is_decision_accept = False
                 else:
                     is_decision_accept = np.random.random() <= lambda_decision
-            if is_decision_accept:
-                if s == 0:
-                    gAacc += 1
-                    cum_gAacc += 1
-                else:
-                    gBacc += 1
-                    cum_gBacc += 1
+
+            
                         
             final_label = 1 if is_decision_accept else 0
             ml_proposed_label = 1 if net_proposes_accept else 0
 
-            utility.append(1 - np.abs(final_label - y.detach().numpy()[0]))
+            if s_detached == 0:
+                if y == 1:
+                    gAseen += 1
+                    cum_gAseen += 1
+                    if is_decision_accept:
+                        gAacc += 1
+                        cum_gAacc += 1
+                else:
+                    cum_gAseen0 += 1
+                    if is_decision_accept:
+                        cum_gAacc0 += 1
+            else:
+                if y == 1:
+                    gBseen += 1
+                    cum_gBseen += 1
+                    if is_decision_accept:
+                        gBacc += 1
+                        cum_gBacc += 1
+                else:
+                    cum_gBseen0 += 1
+                    if is_decision_accept:
+                        cum_gBacc0 += 1
+                
+
+            # prev_step = encode_prev_step(y, s, final_label)
+
+            utility.append(1 - np.abs(final_label - y))
             if final_label == ml_proposed_label:
                 cost_decision.append(0)
             else:
@@ -864,25 +1078,39 @@ def make_buffered_simulation(net, ml_model, ml_algo, dataset, data_loader, sensi
             log_gAseen.append(cum_gAseen)
             log_gAacc.append(cum_gAacc)
             log_gBseen.append(cum_gBseen)
-            log_gBacc.append(cum_gBacc)
+            log_gBacc.append(cum_gBacc)   
+            log_gAseen0.append(cum_gAseen0)
+            log_gAacc0.append(cum_gAacc0)
+            log_gBseen0.append(cum_gBseen0)
+            log_gBacc0.append(cum_gBacc0)   
             expected_cost_with_intervention.append(cost_change)
-            expected_cost_without_intervention.append(cost_keep)
+            expected_cost_without_intervention.append(cost_keep)  
 
-    failure_log = [1 if failure else 0 for _ in log_gAacc]
+
+
+        
+    failure_log = [1 if failure else 0 for _ in log_gAacc] # long_window has no failure condition
     res_dict = {
         "gAseen" : log_gAseen,
         "gAacc" : log_gAacc,
         "gBseen" : log_gBseen,
         "gBacc" : log_gBacc,
+        "gAseen0" : log_gAseen0,
+        "gAacc0" : log_gAacc0,
+        "gBseen0" : log_gBseen0,
+        "gBacc0" : log_gBacc0,
         "cost" : cost_decision,
         "utility" : utility,
         "exp_cost_int" : expected_cost_with_intervention,
         "exp_cost_no_int" : expected_cost_without_intervention,
         "failure" : failure_log
     }
+    
     res_df = pd.DataFrame(res_dict)
-
     return res_df
+
+
+
 
 
 def make_one_simulation(composability_type, net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
@@ -929,10 +1157,10 @@ def make_one_simulation(composability_type, net, ml_model, ml_algo, dataset, dat
                           n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, debug=debug)
         return res_df
         
-
     elif composability_type == "long_window":
         return make_long_window_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 
                           n_cost_bins, dp_threshold, time_horizon, n_windows, lambda_decision, cost_type, debug=debug)
+    
     elif composability_type == "bounded_acc_rates":
         assert (min_acc_rate != None) and (max_acc_rate != None), "Bounds on acc rates not provided"
         res_df = make_bounded_acc_rates_simulation(net, ml_model, ml_algo, dataset, data_loader, sensitive_attr, 

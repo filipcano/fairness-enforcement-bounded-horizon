@@ -11,6 +11,27 @@ from torch.utils.data import DataLoader
 
 
 
+class PandasDataSet(TensorDataset):
+    def __init__(self, *dataframes):
+        tensors = (self._df_to_tensor(df) for df in dataframes)
+        super(PandasDataSet, self).__init__(*tensors)
+
+    def _df_to_tensor(self, df):
+        if isinstance(df, pd.Series):
+            df = df.to_frame("dummy")
+        return torch.from_numpy(df.values.astype('float')).float()
+    
+    # overrride iter function, so that it shuffles before every iter.
+    def __iter__(self):
+        # Convert tensors to a list of tuples
+        data = list(zip(*self.tensors))
+        # Shuffle the data
+        np.random.shuffle(data)
+        # Convert back to tensors
+        shuffled_tensors = [torch.stack(tensor) for tensor in zip(*data)]
+        # Yield the shuffled data
+        return iter(zip(*shuffled_tensors))
+
 
 def clear_lines(lines):
     for _ in range(lines):
@@ -33,15 +54,7 @@ def print_metrics(metrics_dict, metrics_print = "ap,dp", train=True):
 
 
 
-class PandasDataSet(TensorDataset):
-    def __init__(self, *dataframes):
-        tensors = (self._df_to_tensor(df) for df in dataframes)
-        super(PandasDataSet, self).__init__(*tensors)
 
-    def _df_to_tensor(self, df):
-        if isinstance(df, pd.Series):
-            df = df.to_frame("dummy")
-        return torch.from_numpy(df.values.astype('float')).float()
 
 
 def InfiniteDataLoader(dataset, batch_size, shuffle=True, num_workers=0, pin_memory=False, drop_last=True):

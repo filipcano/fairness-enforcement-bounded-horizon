@@ -115,10 +115,8 @@ def run_simulation(task):
         return 0  # Indicate failure to the callback
 
 def main_parallel(params): # parallel version
-    total_iterations = compute_total_iterations(params)
     n_cost_bins = params["n_cost_bins"]
     n_windows = params["n_time_windows"]
-    print(f"{total_iterations=}")
 
     tasks = []
     
@@ -151,6 +149,7 @@ def main_parallel(params): # parallel version
     n_processes = 16
     if not "long_window" in params["composability_types"]:
         n_processes = multiprocessing.cpu_count()-1
+    print(f"{total_iterations=}, {n_processes=}")
     with tqdm(total=total_iterations) as pbar:
         with Pool(processes=n_processes) as pool:
             for task in tasks:

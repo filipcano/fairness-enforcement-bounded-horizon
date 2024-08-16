@@ -301,6 +301,49 @@ def load_compas_data(path="../datasets/compas/raw", sensitive_attribute="sex"):
 
     return X, y, s
 
+
+def load_compas_data_for_paper_table(path="../datasets/compas/raw", sensitive_attribute="sex"):
+    # We use the same features_to_keep and categorical_features from AIF360 at https://github.com/Trusted-AI/AIF360/blob/master/aif360/datasets/compas_dataset.py
+
+    features_to_keep = ["sex","age","age_cat","race","juv_fel_count","juv_misd_count","juv_other_count","priors_count","c_charge_degree","c_charge_desc","two_year_recid"]
+    categorical_features = ["age_cat", "c_charge_degree", "c_charge_desc"]
+
+    df = pd.read_csv(os.path.join(path, "compas-scores-two-years.csv"), index_col = 0)
+
+
+    # df = df.dropna()
+    df = df[df["days_b_screening_arrest"] <= 30]
+    df = df[df["days_b_screening_arrest"] >= -30]
+    df = df[df["is_recid"] != -1]
+    df = df[df["c_charge_degree"] != "O"]
+    df = df[df["score_text"] != "N/A"]
+    df = df[features_to_keep]
+
+    if sensitive_attribute == "sex":
+        s = df[sensitive_attribute]
+        s = (s == "Male").astype(int).to_frame()
+        categorical_features.append("race")
+    elif sensitive_attribute == "race":
+        s = df[sensitive_attribute]
+        s = (s == "Caucasian").astype(int).to_frame()
+        categorical_features.append("sex")
+    else:
+        print("error")
+
+
+    y = (df["two_year_recid"] ==  1 ).astype(int).to_frame()
+
+
+    X = df.drop(columns=["two_year_recid", sensitive_attribute])
+    # X = pd.get_dummies(X, columns=categorical_features)
+
+    # Convert all non-uint8 columns to float32
+    # uint8_cols = X.select_dtypes(exclude="uint8").columns
+    # X[uint8_cols] = X[uint8_cols].astype("float32")
+
+    return X, y, s
+
+
     # pass
 
 

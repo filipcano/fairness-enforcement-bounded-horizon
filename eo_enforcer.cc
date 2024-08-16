@@ -35,21 +35,35 @@ typedef vector<V5D> V6D;
 
 
 
+// float custom_multiply(float a, float b) {
+//     //multiply two floats, with inf*0 = inf
+//     if (std::isinf(a) && b == 0.0f) {
+//         return std::numeric_limits<float>::infinity();
+//     } else if (std::isinf(b) && a == 0.0f) {
+//         return std::numeric_limits<float>::infinity();
+//     } else {
+//         float result = a * b;
+//         if (a != 0.0f && b != 0.0f && result == 0.0f) {
+//             // Return the smallest positive normal float
+//             return std::numeric_limits<float>::min();
+//         }
+//         return result;
+//     }
+// }
+
+
 float custom_multiply(float a, float b) {
-    //multiply two floats, with inf*0 = inf
-    if (std::isinf(a) && b == 0.0f) {
-        return std::numeric_limits<float>::infinity();
-    } else if (std::isinf(b) && a == 0.0f) {
-        return std::numeric_limits<float>::infinity();
-    } else {
-        float result = a * b;
-        if (a != 0.0f && b != 0.0f && result == 0.0f) {
-            // Return the smallest positive normal float
-            return std::numeric_limits<float>::min();
-        }
+    // Handles multiplication under floating point rules more efficiently
+    if (a != 0.0f && b != 0.0f) {
+        float result = a*b;
+        if (result == 0.0f) return std::numeric_limits<float>::min();
         return result;
     }
+    if (std::isinf(a) || std::isinf(b)) return std::numeric_limits<float>::infinity();
+    return 0.0f;
 }
+
+
 
 int sampleNumber(const std::vector<float>& probabilities) {
     // returns an int between 0 and probabilities.size()-1
@@ -100,7 +114,7 @@ class EOEnforcerMinCost {
     // Group A accepted: 0 ... gAseen //
     // Group B accepted : 0 ... T-remaining_decisions-gAseen
     // Group B seen cannot be taken anymore from gAseen and T, so it needs to be tracked as well (because only ground truth = 1 are tracked)
-    // Previous step gives info about the previous step: (prev_step/4)%2 = ground_truth, (prev_step/2)%2 = group,
+    // Previous step gives info about the previous step: (prev_step/2)%2 = group,
     // (prev_step)%2 = decision (0 reject, 1 accept)
 
 
@@ -119,6 +133,7 @@ public:
     int defaultVal;
 
     V4D Prob; // Prob[i][j][k][l] prob of sampling group j, and decision k and value l at timestep i
+    V2D ProbGT; // Prob[group][ground_truth] = prob of getting ground_truth conditioned to group being group
 
     
     float Val(int t, int gAseen, int gAacc, int gBseen, int gBacc, int prev_step);
@@ -127,7 +142,7 @@ public:
     V2D make_one_simulation();
     void save_val_to_file(string filename);
     void load_val_from_file(string filename);
-    int encode_prev_step(int gt, int g, int d);
+    int encode_prev_step(int g, int d);
 };
 
 EOEnforcerMinCost::EOEnforcerMinCost(bool dynamic_distribution) {
@@ -167,6 +182,22 @@ EOEnforcerMinCost::EOEnforcerMinCost(bool dynamic_distribution) {
         }  
     }
 
+    ProbGT = V2D(2, VD(2, 0));
+    for (int group=0; group < 2; ++group) {
+        for (int ground_truth = 0; ground_truth < 2; ++ground_truth) {
+            for (int l = 0; l < X; ++l){
+                ProbGT[group][ground_truth] += Prob[0][group][ground_truth][l];
+            }
+        }
+    }
+
+    for (int group=0; group < 2; ++group) {
+        float factor = ProbGT[group][0] + ProbGT[group][1];
+        for (int ground_truth = 0; ground_truth < 2; ++ground_truth) {
+            ProbGT[group][ground_truth] = ProbGT[group][ground_truth]/factor;
+        }
+    }
+
 
     
     VAL = V6D(T+1);
@@ -180,12 +211,18 @@ EOEnforcerMinCost::EOEnforcerMinCost(bool dynamic_distribution) {
                 for (int gBseen = 0; gBseen < t-gAseen+1; ++gBseen) { // maybe this step can be more efficient with tighter bound on gBseen
                     VAL[rem_dec][gAseen][gAacc][gBseen] = V2D(gBseen+1);
                     for (int gBacc = 0; gBacc < gBseen+1; ++gBacc) {
-                        VAL[rem_dec][gAseen][gAacc][gBseen][gBacc] = VD(8, defaultVal);
+                        VAL[rem_dec][gAseen][gAacc][gBseen][gBacc] = VD(4, defaultVal);
+                        VAL[rem_dec][gAseen][gAacc][gBseen][gBacc].shrink_to_fit();
                     }
+                    VAL[rem_dec][gAseen][gAacc][gBseen].shrink_to_fit();
                 }
+                VAL[rem_dec][gAseen][gAacc].shrink_to_fit();
             }
+            VAL[rem_dec][gAseen].shrink_to_fit();
         }
+        VAL[rem_dec].shrink_to_fit();
     }
+    VAL.shrink_to_fit();
 }
 
 
@@ -263,10 +300,11 @@ void EOEnforcerMinCost::save_val_to_file(string filename) {
                                 print = false;
                             }
                             else if (val == INF) {
+                                // VAL[remaining_decisions][Group A seen][Group A accepted][Group B seen][Group B acc][prev_step]
                                 int gAseen = i2;
                                 int gAacc = i3;
-                                int gBacc = i4;
-                                int gBseen = T - i1 - gAseen;
+                                int gBseen = i4;
+                                int gBacc = i5;
                                 float dp = compute_eo(gAseen, gAacc, gBseen, gBacc); // WARNING: point of contention, maybe it would be more intuitive for compute_eo to take prev_step into account.
                                 if (dp <= eps*1.01) print = true; // extra 1.1 is to guard for numerical errors
                                 else print = false;
@@ -336,21 +374,17 @@ float EOEnforcerMinCost::compute_eo(int gAseen, int gAacc, int gBseen, int gBacc
     // return abs((float)a/float(b+1.0) - (float)p/float(q+1.0));
 }
 
-int EOEnforcerMinCost::encode_prev_step(int gt, int g, int d) { // ground_truth, group, decision
-    if ((gt == 0) and (g == 0) and (d == 0)) return 0;
-    if ((gt == 0) and (g == 0) and (d == 1)) return 1;
-    if ((gt == 0) and (g == 1) and (d == 0)) return 2;
-    if ((gt == 0) and (g == 1) and (d == 1)) return 3;
-    if ((gt == 1) and (g == 0) and (d == 0)) return 4;
-    if ((gt == 1) and (g == 0) and (d == 1)) return 5;
-    if ((gt == 1) and (g == 1) and (d == 0)) return 6;
-    if ((gt == 1) and (g == 1) and (d == 1)) return 7;
+int EOEnforcerMinCost::encode_prev_step(int g, int d) { // ground_truth, group, decision
+    if ((g == 0) and (d == 0)) return 0;
+    if ((g == 0) and (d == 1)) return 1;
+    if ((g == 1) and (d == 0)) return 2;
+    if ((g == 1) and (d == 1)) return 3;
     return -1;
 }
 
 float EOEnforcerMinCost::Val(int t, int gAseen, int gAacc, int gBseen, int gBacc, int prev_step) {
     // cout << "hola1" << endl;
-    // cout << "t: " << t << ", gAacc: " <<  gAacc << ", gBacc: " << gBacc << ", gAseen: " << gAseen << endl;
+    // cout << "t: " << t << ", gAseen: " <<  gAacc << ", gAacc: " <<  gAacc <<", gBseen: " <<  gBseen << ", gBacc: " << gBacc << ", prev_step: " << prev_step << endl;
     float& res = VAL[t][gAseen][gAacc][gBseen][gBacc][prev_step];
     // cout << "t: " << t << ", gAacc: " <<  gAacc << ", gBacc: " << gBacc << endl << endl;
     // cout << ", gAseen: " << gAseen << ", gBseen" << (X-t)-gAseen << ", res: " << res << endl; 
@@ -359,32 +393,39 @@ float EOEnforcerMinCost::Val(int t, int gAseen, int gAacc, int gBseen, int gBacc
     // int gBseen = (T-t)-gAseen;
     // cout << t << endl;
 
-    if (t < T) { // in the first step, trace is not updated because there is in fact no previous step
-        int prevDec = (prev_step)%2;
-        int prevG = (prev_step/2)%2;
-        int prevGT = (prev_step/4)%2;
-        if (prevGT == 1) {
-            if (prevG == GROUP_A) {
-                gAseen += 1;
-                if (prevDec == 1) gAacc += 1;
-            }
-            else {
-                gBseen += 1;
-                if (prevDec == 1) gBacc += 1;
-            }
-        }
+    int prevDec = (prev_step)%2;
+    int prevG = (prev_step/2)%2;
+
+    int gAseenGT1 = gAseen;
+    int gAaccGT1 = gAacc;
+    int gBseenGT1 = gBseen;
+    int gBaccGT1 = gBacc;
+
+
+    if (prevG == GROUP_A) {
+        ++gAseenGT1;
+        if (prevDec == ACCEPT) ++gAaccGT1;
     }
+    else {
+        ++gBseenGT1;
+        if (prevDec == ACCEPT) ++gBaccGT1;
+    }
+
     
-    if (t == 0) {        
-        float bias = compute_eo(gAseen, gAacc, gBseen, gBacc);
-        int min_seen = 2*int(ceil(1/eps));
-        // cout << min_seen << endl;
+    
+    if (t == 0) {
+
+        float biasgt0 = compute_eo(gAseen, gAacc, gBseen, gBacc); // bias if ground truth is zero
+        float biasgt1 = compute_eo(gAseenGT1, gAaccGT1, gBseenGT1, gBaccGT1); // bias if ground truth is one
+
+        int min_seen = int(ceil(1/(beta-alpha)));
         if ((alpha == 0) and (beta == 1)) min_seen = 0;
 
         if ((gAseen >= min_seen) and (gBseen >= min_seen)) {
             bool accRateA = (custom_multiply(alpha,gAseen) <= gAacc) and (gAacc <= custom_multiply(beta,gAseen));
             bool accRateB = (custom_multiply(alpha,gBseen) <= gBacc) and (gBacc <= custom_multiply(beta,gBseen));    
-            if ((bias <= eps) and accRateA and accRateB) {
+            if ((biasgt0 <= eps) and (biasgt1 <= eps)
+             and accRateA and accRateB) {
                 return res = 0;
             } 
             return res = INF;
@@ -394,38 +435,45 @@ float EOEnforcerMinCost::Val(int t, int gAseen, int gAacc, int gBseen, int gBacc
 
     res = 0;
 
+    float valGT0 = 0;
+    float valGT1 = 0;
+
     for (int group = 0; group < 2; ++group) {
+        int prev_step_acc = encode_prev_step(group, ACCEPT);
+        int prev_step_rej = encode_prev_step(group, REJECT);
+        
         for (int k = 0; k < X; ++k) {
-            for (int ground_truth = 0; ground_truth < 2; ++ground_truth){
-                int prev_step_acc = encode_prev_step(ground_truth, group, 1);
-                int prev_step_rej = encode_prev_step(ground_truth, group, 0);
-                for (int decision = 0; decision < 2; ++decision) {
-                    float accept = 0;
-                    float reject = 0;
-                    if (group == GROUP_A and decision == ACCEPT) {
-                        accept = Val(t-1,gAseen, gAacc,gBseen, gBacc, prev_step_acc);
-                        reject = N[k] + Val(t-1, gAseen, gAacc, gBseen, gBacc, prev_step_rej);
-                    }
-                    else if (group == GROUP_A and decision == REJECT) {
-                        accept = N[k] + Val(t-1, gAseen, gAacc, gBseen, gBacc, prev_step_acc);
-                        reject = Val(t-1,gAseen, gAacc, gBseen, gBacc, prev_step_rej);
-                    }
-                    else if (group == GROUP_B and decision == ACCEPT)  { 
-                        accept = Val(t-1,gAseen, gAacc, gBseen, gBacc, prev_step_acc);
-                        reject = N[k] + Val(t-1, gAseen, gAacc, gBseen, gBacc, prev_step_rej);
-                    }
-                    else { // group == GROUP_B and decision == REJECT
-                        accept = N[k] + Val(t-1, gAseen, gAacc, gBseen, gBacc,prev_step_acc);
-                        reject = Val(t-1, gAseen, gAacc, gBseen, gBacc,prev_step_rej);
-                    }
-                    float prob_GT = 0;
-                    if ((decision == ground_truth)) prob_GT = 0.5 + 0.5*(float)k/(float)X;
-                    else prob_GT = 0.5 - 0.5*(float)k/(float)X;
-                    res += custom_multiply(prob_GT*Prob[t][group][decision][k],min(accept, reject)); 
+            for (int decision = 0; decision < 2; ++decision) {
+                float accept = 0;
+                float reject = 0;
+                float acceptGT1 = 0;
+                float rejectGT1 = 0;
+
+                if (decision == ACCEPT) {
+                    accept = Val(t-1,gAseen, gAacc,gBseen, gBacc, prev_step_acc);
+                    reject = N[k] + Val(t-1, gAseen, gAacc, gBseen, gBacc, prev_step_rej);
+                    if ((accept == INF) and (reject == INF)) return res = INF;
+                    acceptGT1 = Val(t-1,gAseenGT1, gAaccGT1,gBseenGT1, gBaccGT1, prev_step_acc);
+                    rejectGT1 = N[k] + Val(t-1, gAseenGT1, gAaccGT1, gBseenGT1, gBaccGT1, prev_step_rej);
                 }
+                else {
+                    accept = N[k] + Val(t-1,gAseen, gAacc,gBseen, gBacc, prev_step_acc);
+                    reject = Val(t-1, gAseen, gAacc, gBseen, gBacc, prev_step_rej);
+                    if ((accept == INF) and (reject == INF)) return res = INF;
+                    acceptGT1 = N[k] + Val(t-1,gAseenGT1, gAaccGT1,gBseenGT1, gBaccGT1, prev_step_acc);
+                    rejectGT1 = Val(t-1, gAseenGT1, gAaccGT1, gBseenGT1, gBaccGT1, prev_step_rej);
+                }
+                if ((T != 0) and (acceptGT1 == INF) and (rejectGT1 == INF)) return res = INF;
+                valGT0 += custom_multiply(Prob[t][group][decision][k], min(accept, reject));
+                valGT1 += custom_multiply(Prob[t][group][decision][k], min(acceptGT1, rejectGT1));
             }
         }
     }
+    if (t == T) {
+        return res = valGT0;        
+    }
+
+    res = custom_multiply(ProbGT[prevG][0],valGT0) + custom_multiply(ProbGT[prevG][1],valGT1);
     return res;
 }
 
@@ -465,22 +513,28 @@ int main(int argc, char **argv) {
     PrintMemoryInfo("Optimized");
     if (save_policy) FA.save_val_to_file(filename);
 
-
-    // int i1 = 0;
-    // for (int i2=0; i2 < FA.VAL[i1].size(); ++i2) {
-    //     for (int i3=0; i3< FA.VAL[i1][i2].size(); ++i3) {
-    //         for (int i4=0; i4< FA.VAL[i1][i2][i3].size(); ++i4) {
-    //             for (int i5=0; i5 < FA.VAL[i1][i2][i3][i4].size(); ++i5) {
-    //                 for (int i6=0; i6 < FA.VAL[i1][i2][i3][i4][i5].size(); ++i6) {
-    //                     float theval = FA.VAL[i1][i2][i3][i4][i5][i6];
-    //                     if ((theval != INF) and (theval != -1)) {
-    //                         cout << i1 << " " << i2 << " " << i3 << " " << i4 << " " << i5 << " " << i6 << " " << theval << endl;
+    // long long int count_total = 0;
+    // long long int count_minus1 = 0;
+    // for (int i1 = 0; i1 < FA.VAL.size(); ++i1) {
+    //     for (int i2=0; i2 < FA.VAL[i1].size(); ++i2) {
+    //         for (int i3=0; i3< FA.VAL[i1][i2].size(); ++i3) {
+    //             for (int i4=0; i4< FA.VAL[i1][i2][i3].size(); ++i4) {
+    //                 for (int i5=0; i5 < FA.VAL[i1][i2][i3][i4].size(); ++i5) {
+    //                     for (int i6=0; i6 < FA.VAL[i1][i2][i3][i4][i5].size(); ++i6) {
+    //                         float theval = FA.VAL[i1][i2][i3][i4][i5][i6];
+    //                         if (theval == -1) count_minus1++;
+    //                         count_total++;
+    //                         // cout << i1 << " " << i2 << " " << i3 << " " << i4 << " " << i5 << " " << i6;
+    //                         // cout << " " << FA.VAL[i1][i2][i3][i4][i5][i6] << "\n";
     //                     }
     //                 }
     //             }
     //         }
     //     }
     // }
+    // double ratio = 100*((double)count_minus1/count_total);
+    // cout << "count total: " << count_total << ", count -1: " << count_minus1 << ", ratio: " << ratio << "%" << endl;
+    
     
 
 }

@@ -83,36 +83,36 @@ def get_bounds_on_acceptance_rates(dataset, dp_threshold, time_horizon):
 
 
 def run_simulation(task):
-    try:
-        ml_model, ml_algo, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, composability_type, n_windows, idx_simul = task
-        dp_threshold_str = f"{dp_threshold:.4f}".split('.')[1]
-        min_acc_rate, max_acc_rate, prob = get_bounds_on_acceptance_rates(dataset, dp_threshold, time_horizon)
-        # if prob < 0.4 and composability_type == "bounded_acc_rates":
-        #     logging.error(f"In simulation {task}, the probability of gettig and enforceable trace was too small {prob=}")
-        #     return 0
-        
-        res_df = make_one_composable_simulation_eqopp.main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, n_windows, composability_type, min_acc_rate=min_acc_rate, max_acc_rate=max_acc_rate, debug=0)
-        # if len(res_df) == time_horizon*n_windows:
-        res_df['sim_num'] = idx_simul
-        res_df['step'] = res_df.index
-        res_df['acc_util'] = res_df['utility'].cumsum()
-        res_df['acc_cost'] = res_df['cost'].cumsum()
-        res_df['intervention'] = (res_df['cost'] != 0).astype(int)
-        res_df['n_interventions'] = res_df['intervention'].cumsum()
-        path_to_save = f"experimental_results/simulation_results/eo_{dataset}_{sensitive_attr}_{ml_algo}_{time_horizon}_{cost_type}_{n_cost_bins}_{dp_threshold_str}_{lambda_decision}_composable_{composability_type}_{n_windows}.csv"
-        if os.path.isfile(path_to_save):
-            res_df.to_csv(path_to_save, mode='a', header=False, index=True)
-        else:
-            res_df.to_csv(path_to_save)
-        return 1
+    # try:
+    ml_model, ml_algo, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, composability_type, n_windows, idx_simul = task
+    dp_threshold_str = f"{dp_threshold:.4f}".split('.')[1]
+    min_acc_rate, max_acc_rate, prob = get_bounds_on_acceptance_rates(dataset, dp_threshold, time_horizon)
+    # if prob < 0.4 and composability_type == "bounded_acc_rates":
+    #     logging.error(f"In simulation {task}, the probability of gettig and enforceable trace was too small {prob=}")
+    #     return 0
+    
+    res_df = make_one_composable_simulation_eqopp.main(ml_model, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, n_windows, composability_type, min_acc_rate=min_acc_rate, max_acc_rate=max_acc_rate, debug=0)
+    # if len(res_df) == time_horizon*n_windows:
+    res_df['sim_num'] = idx_simul
+    res_df['step'] = res_df.index
+    res_df['acc_util'] = res_df['utility'].cumsum()
+    res_df['acc_cost'] = res_df['cost'].cumsum()
+    res_df['intervention'] = (res_df['cost'] != 0).astype(int)
+    res_df['n_interventions'] = res_df['intervention'].cumsum()
+    path_to_save = f"experimental_results/simulation_results/eo_{dataset}_{sensitive_attr}_{ml_algo}_{time_horizon}_{cost_type}_{n_cost_bins}_{dp_threshold_str}_{lambda_decision}_composable_{composability_type}_{n_windows}.csv"
+    if os.path.isfile(path_to_save):
+        res_df.to_csv(path_to_save, mode='a', header=False, index=True)
+    else:
+        res_df.to_csv(path_to_save)
+    return 1
 
         #     return 1
         # else:
         #     logging.error(f"In task {task}, the resulting dataframe was incomplete, with {len(res_df)} rows")
 
-    except Exception as e:
-        logging.error(f"Error in simulation {task}: {e}")
-        return 0  # Indicate failure to the callback
+    # except Exception as e:
+    #     logging.error(f"Error in simulation {task}: {e}")
+    #     return 0  # Indicate failure to the callback
 
 def main_parallel(params): # parallel version
     n_cost_bins = params["n_cost_bins"]
@@ -146,9 +146,9 @@ def main_parallel(params): # parallel version
                                         tasks.append(task)
 
     total_iterations = len(tasks)
-    n_processes = 16
-    if not "long_window" in params["composability_types"]:
-        n_processes = multiprocessing.cpu_count()-1
+    n_processes = 20
+    # if not "long_window" in params["composability_types"]:
+        # n_processes = multiprocessing.cpu_count()-1
     print(f"{total_iterations=}, {n_processes=}")
     with tqdm(total=total_iterations) as pbar:
         with Pool(processes=n_processes) as pool:
@@ -156,6 +156,53 @@ def main_parallel(params): # parallel version
                 pool.apply_async(run_simulation, args=(task,), callback=lambda _: pbar.update(1))
             pool.close()
             pool.join()
+
+
+
+def main_parallel_from_missing_list(missing): # parallel version
+    n_cost_bins = params["n_cost_bins"]
+    n_windows = params["n_time_windows"]
+
+    tasks = []
+
+
+    for fullfilename in missing.keys():
+        filename = fullfilename.split("/")[-1]
+        offset = 1 if filename.split("_")[1] == "bank" else 0
+        dataset = filename.split("_")[1] if offset == 0 else "bank_marketing"
+        sensitive_attr = filename.split("_")[2+offset]
+        ml_algo = filename.split("_")[3 + offset]
+        time_horizon = int(filename.split("_")[4 + offset])
+        cost_type = filename.split("_")[5 + offset]
+        n_cost_bins = int(filename.split("_")[6 + offset])
+        dp_threshold_str = filename.split("_")[7 + offset]
+        dp_threshold = float(dp_threshold_str)/10000
+        lambda_decision = int(filename.split("_")[8+offset])
+        composability_type = filename.split("_")[10+offset]
+        n_windows = int(filename.split("_")[11+offset].split(".")[0])
+
+        ml_model = f"experimental_results/ML_models/model_{dataset}_{sensitive_attr}_{ml_algo}.pkl"
+        idx_simuls = missing[fullfilename]
+
+        for idx_simul in idx_simuls:
+            task = (ml_model, ml_algo, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, composability_type, n_windows, idx_simul)
+            tasks.append(task)
+
+    
+
+    total_iterations = len(tasks)
+    n_processes = 16
+    # if not "long_window" in params["composability_types"]:
+        # n_processes = multiprocessing.cpu_count()-1
+    print(f"{total_iterations=}, {n_processes=}")
+    with tqdm(total=total_iterations) as pbar:
+        with Pool(processes=n_processes) as pool:
+            for task in tasks:
+                pool.apply_async(run_simulation, args=(task,), callback=lambda _: pbar.update(1))
+            pool.close()
+            pool.join()
+
+
 
 
 
@@ -175,7 +222,7 @@ def main_sequential(params): # parallel version
                     for cost_type in params["costs"]:
                         for lambda_decision in params["lambda_decision"]:
                             for time_horizon in params["time_horizon"]:
-                                for dp_threshold in params["dp_thresholds"]:
+                                for dp_threshold in params["dp_thresholds"]:                                
                                     for composability_type in params["composability_types"]:
                                         task = (ml_model, ml_algo, dataset, sensitive_attr, time_horizon, n_cost_bins, dp_threshold, cost_type, lambda_decision, composability_type, n_windows, idx_simul)
                                         # tasks.append(task)
@@ -214,7 +261,11 @@ if __name__ == "__main__":
 
     print(params["composability_types"])
 
-    
+    # np.random.seed(123)
     main_parallel(params)
+    # with open("missing75.json", "r") as fp:
+    #     missing = json.load(fp)
+    # main_parallel_from_missing_list(missing)
+
     # main_sequential(params)
     # check_memory()
