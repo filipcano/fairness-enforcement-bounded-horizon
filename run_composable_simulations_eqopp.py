@@ -261,7 +261,7 @@ if __name__ == "__main__":
 
     print(params["composability_types"])
 
-    # np.random.seed(123)
+    np.random.seed(123) # seed start to make reproducible experiments
     main_parallel(params)
     # with open("missing75.json", "r") as fp:
     #     missing = json.load(fp)

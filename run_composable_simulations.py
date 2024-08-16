@@ -214,7 +214,7 @@ if __name__ == "__main__":
 
     print(params["composability_types"])
 
-    
+    np.random.seed(123) # seed start to make reproducible experiments
     main_parallel(params)
     # main_sequential(params)
     # check_memory()

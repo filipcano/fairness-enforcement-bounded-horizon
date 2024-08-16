@@ -48,3 +48,4 @@ To run simulations for equal opportunity with many windows, static and dynamic s
 python run_composable_simulation_eqopp.py --params_file experimental_setups/simulation_composable_eo.json
 ```
 
+## How to reproduce the graphs in the paper
