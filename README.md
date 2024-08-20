@@ -19,6 +19,8 @@ The code for training ML classifiers and doing simulations is in python. The rep
 - *synthesis_runtimes.py*: Script used to produce the plots on resource usage of the shield synthesis algorithm
 - *datasets/*: Folder containing datasets. To alleviate space, it contains just the instructions on how to download the datasets, as they are publicly available.
 - *experimental_setups/*: The main scripts use a parameter file to describe which simulations are to be run. This folder contains the parameter files used to produce the experiments in the paper.
+- *experimental_results/*: This is a placeholder folder, where experimental results are to be stored by the different scripts. For space restrictions, we do not inlcude the results of our experiments in this supplementary material.
+- *experimenta_analysis.ipynb*: Notebook to reproduce the plots included in the paper and in the appendix.
 
 
 ## How to run
@@ -49,3 +51,9 @@ python run_composable_simulation_eqopp.py --params_file experimental_setups/simu
 ```
 
 ## How to reproduce the graphs in the paper
+To reproduce the graphs on computation time (Fig. 3) run
+```
+python synthesis_runtimes.py
+```
+
+To reproduce the rest of the graphs, run all simulations as descibed before. Place the simulations with many windows (i.e., the simulations on periodic shielding) in a folder `experimental_results/simulation_collection_period/` and use the notebook `experiment_analysis.ipynb` to build the graphs.
